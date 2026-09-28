@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<!--
+  =============================================================================
+  JAZZ DASH — home / login page for the JazzDash repo
+  =============================================================================
+  This page is the front door for every dashboard tool in this repo. It does
+  three things:
+
+    1. Shows three buttons in a red-neon-bordered box: "Open folder locally"
+       and "Open file locally" (no login — these just jump straight to a
+       chosen dashboard's own page, where that dashboard's own folder/file
+       picker takes over) and "Login to Jazz Dash" (Google sign-in).
+
+    2. After Google sign-in succeeds, Google itself has already gated WHO can
+       get this far — while this app's OAuth consent screen is in "Testing"
+       status in Google Cloud Console, only emails on the Test Users list can
+       complete sign-in at all. Nothing in this file enforces that; it's a
+       Google-side gate.
+
+    3. Once signed in, this page checks — using the signed-in person's own
+       Drive access token — which of the known dashboards' Drive folders
+       they can actually see (a plain Drive "files.list" search by folder
+       name, scoped to drive.metadata.readonly — read-only metadata, no file
+       contents ever touched). Only the dashboards whose Drive folder is
+       visible to them get shown as buttons. Whoever owns those Drive
+       folders controls dashboard access just by sharing/unsharing the
+       folder — no separate permissions system to maintain here.
+
+  TO ADD A NEW DASHBOARD LATER: add one entry to the DASHBOARDS array below
+  (folder name in Drive + the label + the html file to open), and share a
+  same-named Drive folder with whoever should see it. That's the whole
+  process — no other code changes needed.
+
+  TO ADD/REMOVE A TEST USER: Google Cloud Console → APIs & Services → OAuth
+  consent screen → Test users. Takes effect immediately, no redeploy needed.
+
+  Before this works on your real GitHub Pages URL, add that URL (e.g.
+  https://<you>.github.io) as an "Authorized JavaScript origin" on this
+  OAuth Client ID in Google Cloud Console → APIs & Services → Credentials.
+  =============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jazz Dash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{
+  --ink-900:#0B0908;
+  --ink-800:#14100F;
+  --ink-700:#1E1815;
+  --line:#3A322C;
+  --text-hi:#F1EAE6;
+  --text-lo:#9C9188;
+  --red:#E2434A;
+  --red-dim:#B4433A;
+  --red-glow: rgba(226,67,74,.55);
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(226,67,74,.08), transparent 60%),
+    var(--ink-900);
+  color:var(--text-hi);
+  font-family:'IBM Plex Sans', sans-serif;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+  padding:24px;
+}
+
+.frame{
+  width:100%;
+  max-width:420px;
+  background:var(--ink-800);
+  border:1.5px solid var(--red);
+  border-radius:18px;
+  padding:44px 36px 38px;
+  box-shadow:
+    0 0 18px var(--red-glow),
+    0 0 46px rgba(226,67,74,.28),
+    0 0 90px rgba(226,67,74,.14),
+    inset 0 0 30px rgba(226,67,74,.06);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:10px;
+  animation:pulse-glow 3.6s ease-in-out infinite;
+}
+@keyframes pulse-glow{
+  0%,100%{ box-shadow:0 0 18px var(--red-glow), 0 0 46px rgba(226,67,74,.28), 0 0 90px rgba(226,67,74,.14), inset 0 0 30px rgba(226,67,74,.06); }
+  50%{ box-shadow:0 0 26px var(--red-glow), 0 0 64px rgba(226,67,74,.38), 0 0 120px rgba(226,67,74,.2), inset 0 0 38px rgba(226,67,74,.09); }
+}
+
+.brand{
+  font-family:'Source Serif 4', serif;
+  font-weight:700;
+  font-size:26px;
+  letter-spacing:.01em;
+  margin-bottom:2px;
+}
+.brand .jazz{color:var(--text-hi);}
+.brand .dash{color:var(--red);}
+.tagline{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-lo);
+  margin-bottom:28px;
+}
+
+.btn{
+  width:100%;
+  padding:15px 18px;
+  border-radius:10px;
+  font-family:'IBM Plex Sans', sans-serif;
+  font-size:14.5px;
+  font-weight:600;
+  cursor:pointer;
+  text-align:center;
+  transition:transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+.btn:hover{ transform:translateY(-1px); }
+.btn:active{ transform:translateY(0); }
+
+.btn-ghost{
+  background:transparent;
+  color:var(--text-hi);
+  border:1px solid var(--line);
+}
+.btn-ghost:hover{ border-color:var(--red-dim); }
+
+.btn-primary{
+  background:var(--red);
+  color:#fff;
+  border:1px solid var(--red);
+  font-size:15.5px;
+  padding:17px 18px;
+  box-shadow:0 0 16px rgba(226,67,74,.45);
+}
+.btn-primary:hover{ background:#ef5158; box-shadow:0 0 26px rgba(226,67,74,.65); }
+
+.divider{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:6px 0 4px;
+  color:var(--text-lo);
+  font-family:'IBM Plex Mono', monospace;
+  font-size:10.5px;
+  letter-spacing:.08em;
+}
+.divider::before, .divider::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:var(--line);
+}
+
+.btn-row{ display:flex; flex-direction:column; gap:10px; width:100%; }
+
+.sub-panel{ width:100%; display:flex; flex-direction:column; gap:10px; }
+.sub-panel .back-link{
+  align-self:flex-start;
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11.5px;
+  color:var(--text-lo);
+  cursor:pointer;
+  margin-bottom:2px;
+}
+.sub-panel .back-link:hover{ color:var(--text-hi); }
+.sub-panel .prompt{
+  font-size:12.5px;
+  color:var(--text-lo);
+  margin-bottom:2px;
+}
+
+.user-chip{
+  display:flex; align-items:center; gap:10px;
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  margin-bottom:6px;
+}
+.user-chip img{ width:28px; height:28px; border-radius:50%; }
+.user-chip .who{ flex:1; min-width:0; }
+.user-chip .name{ font-size:13px; font-weight:600; color:var(--text-hi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-chip .email{ font-size:11px; color:var(--text-lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-chip .signout{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-lo); cursor:pointer; flex:0 0 auto; }
+.user-chip .signout:hover{ color:var(--red); }
+
+.status-line{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11.5px;
+  color:var(--text-lo);
+  text-align:center;
+  min-height:16px;
+  margin-top:4px;
+}
+.status-line.err{ color:var(--red); }
+
+.empty-note{
+  font-size:12.5px;
+  color:var(--text-lo);
+  text-align:center;
+  padding:10px 0 2px;
+  line-height:1.5;
+}
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <div class="brand"><span class="jazz">Jazz</span> <span class="dash">Dash</span></div>
+  <div class="tagline">Mobilink Bank · Dashboards</div>
+
+  <!-- ===================== HOME PANEL (always the starting point) ===================== -->
+  <div id="homePanel" class="btn-row">
+    <button type="button" class="btn btn-ghost" id="openFolderBtn">Open folder locally</button>
+    <button type="button" class="btn btn-ghost" id="openFileBtn">Open file locally</button>
+    <div class="divider">OR</div>
+    <button type="button" class="btn btn-primary" id="loginBtn">Login to Jazz Dash</button>
+  </div>
+
+  <!-- ===================== "WHICH DASHBOARD" PANEL (local open flow) ===================== -->
+  <div id="pickerPanel" class="sub-panel" style="display:none;">
+    <div class="back-link" id="pickerBack">&larr; Back</div>
+    <div class="prompt" id="pickerPrompt"></div>
+    <div class="btn-row" id="pickerButtons"></div>
+  </div>
+
+  <!-- ===================== SIGNED-IN PANEL (shows only shared dashboards) ===================== -->
+  <div id="dashPanel" class="sub-panel" style="display:none;">
+    <div class="user-chip" id="userChip"></div>
+    <div class="btn-row" id="dashButtons"></div>
+    <div class="empty-note" id="dashEmptyNote" style="display:none;">
+      No dashboards have been shared with your account yet — ask an admin to share the relevant Drive folder with you.
+    </div>
+  </div>
+
+  <div class="status-line" id="statusLine"></div>
+</div>
+
+<script>
+// =============================================================================
+// CONFIG — the only part you should need to touch to add a new dashboard.
+// =============================================================================
+const GOOGLE_CLIENT_ID = "266151179037-31hb7cd1rug94o423ab4kbonrqcfo060.apps.googleusercontent.com";
+
+// One entry per dashboard. `driveFolderName` must exactly match the name of
+// a real Drive folder that dashboard's data lives in — whoever owns that
+// folder controls who sees this button just by sharing/unsharing it.
+const DASHBOARDS = [
+  { driveFolderName: "Compliance",     label: "Compliance Dash", url: "compliance_dashboard.html" },
+  { driveFolderName: "Internal Audit", label: "Audit Dash",      url: "audit_dashboard.html" },
+];
+
+// =============================================================================
+
+const homePanel = document.getElementById("homePanel");
+const pickerPanel = document.getElementById("pickerPanel");
+const dashPanel = document.getElementById("dashPanel");
+const statusLine = document.getElementById("statusLine");
+
+function showPanel(panel) {
+  [homePanel, pickerPanel, dashPanel].forEach((p) => { p.style.display = p === panel ? "" : "none"; });
+}
+function setStatus(msg, isError) {
+  statusLine.textContent = msg || "";
+  statusLine.classList.toggle("err", !!isError);
+}
+
+// --------------------------------------------------- "open locally" flow --
+// File System Access API pickers need a direct user click to work, and that
+// permission doesn't carry across a page navigation — so rather than try to
+// auto-trigger a dashboard's picker from here (which browsers will reliably
+// block), this just jumps to the chosen dashboard's own page, where its own
+// "Choose folder" / "Open file(s)" button is one more real click away.
+function openPickerFor(mode) {
+  document.getElementById("pickerPrompt").textContent =
+    mode === "folder" ? "Open a folder in which dashboard?" : "Open a file in which dashboard?";
+  document.getElementById("pickerButtons").innerHTML = DASHBOARDS.map(
+    (d) => `<button type="button" class="btn btn-ghost" data-url="${d.url}">${d.label}</button>`
+  ).join("");
+  document.getElementById("pickerButtons").querySelectorAll("[data-url]").forEach((btn) => {
+    btn.addEventListener("click", () => { window.location.href = btn.getAttribute("data-url"); });
+  });
+  showPanel(pickerPanel);
+}
+document.getElementById("openFolderBtn").addEventListener("click", () => openPickerFor("folder"));
+document.getElementById("openFileBtn").addEventListener("click", () => openPickerFor("file"));
+document.getElementById("pickerBack").addEventListener("click", () => { showPanel(homePanel); setStatus(""); });
+
+// --------------------------------------------------------- Google sign-in --
+let tokenClient = null;
+let currentUser = null;   // {name, email, picture}
+let accessToken = null;
+
+function initGoogle() {
+  if (typeof google === "undefined" || !google.accounts) {
+    setStatus("Couldn't load Google Sign-In — check your connection and reload.", true);
+    return;
+  }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    // metadata.readonly is enough to check folder VISIBILITY by name — this
+    // page never reads or downloads any file's actual contents.
+    scope: "https://www.googleapis.com/auth/drive.metadata.readonly " +
+           "https://www.googleapis.com/auth/userinfo.email " +
+           "https://www.googleapis.com/auth/userinfo.profile",
+    callback: async (resp) => {
+      if (resp.error) {
+        setStatus("Sign-in was cancelled or blocked.", true);
+        return;
+      }
+      accessToken = resp.access_token;
+      await afterSignIn();
+    },
+  });
+}
+window.addEventListener("load", initGoogle);
+
+document.getElementById("loginBtn").addEventListener("click", () => {
+  if (!tokenClient) { setStatus("Google Sign-In is still loading — try again in a moment.", true); return; }
+  setStatus("Opening Google sign-in…");
+  tokenClient.requestAccessToken({ prompt: "" });
+});
+
+async function afterSignIn() {
+  setStatus("Checking your account…");
+  try {
+    const userResp = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!userResp.ok) throw new Error("Could not read your Google profile.");
+    currentUser = await userResp.json();
+  } catch (err) {
+    setStatus(err.message || "Sign-in failed.", true);
+    return;
+  }
+
+  renderUserChip();
+  setStatus("Checking which dashboards are shared with you…");
+
+  const accessible = [];
+  for (const d of DASHBOARDS) {
+    try {
+      if (await canSeeDriveFolder(d.driveFolderName)) accessible.push(d);
+    } catch (err) {
+      console.warn(`Could not check Drive access for "${d.driveFolderName}":`, err);
+    }
+  }
+
+  const dashButtons = document.getElementById("dashButtons");
+  const emptyNote = document.getElementById("dashEmptyNote");
+  if (accessible.length) {
+    dashButtons.innerHTML = accessible.map(
+      (d) => `<button type="button" class="btn btn-primary" data-url="${d.url}" style="box-shadow:none;">${d.label}</button>`
+    ).join("");
+    dashButtons.querySelectorAll("[data-url]").forEach((btn) => {
+      btn.addEventListener("click", () => { window.location.href = btn.getAttribute("data-url"); });
+    });
+    emptyNote.style.display = "none";
+  } else {
+    dashButtons.innerHTML = "";
+    emptyNote.style.display = "";
+  }
+
+  setStatus("");
+  showPanel(dashPanel);
+}
+
+// Returns true if the signed-in user can see AT LEAST ONE Drive folder with
+// this exact name — a plain metadata search using their own access token,
+// scoped to drive.metadata.readonly. Drive itself only returns folders the
+// user owns or has been shared, so this is the entire access check.
+async function canSeeDriveFolder(folderName) {
+  const q = `mimeType='application/vnd.google-apps.folder' and name='${folderName.replace(/'/g, "\\'")}' and trashed=false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=1&fields=files(id,name)`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) throw new Error(`Drive check failed (${resp.status})`);
+  const data = await resp.json();
+  return Array.isArray(data.files) && data.files.length > 0;
+}
+
+function renderUserChip() {
+  const chip = document.getElementById("userChip");
+  chip.innerHTML = `
+    ${currentUser.picture ? `<img src="${currentUser.picture}" alt="">` : ""}
+    <div class="who">
+      <div class="name">${escapeHtml(currentUser.name || currentUser.email || "Signed in")}</div>
+      <div class="email">${escapeHtml(currentUser.email || "")}</div>
+    </div>
+    <span class="signout" id="signOutBtn">Sign out</span>
+  `;
+  document.getElementById("signOutBtn").addEventListener("click", signOut);
+}
+function signOut() {
+  if (accessToken && google.accounts.oauth2.revoke) {
+    google.accounts.oauth2.revoke(accessToken, () => {});
+  }
+  accessToken = null;
+  currentUser = null;
+  setStatus("");
+  showPanel(homePanel);
+}
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>
