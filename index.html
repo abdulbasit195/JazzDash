@@ -749,12 +749,64 @@ async function listDriveExcelFiles(folderId) {
   const data = await resp.json();
   return (data.files || []).filter((f) => isExcel(f.name));
 }
+
+// ---- Drive download cache -------------------------------------------------
+// A separate IndexedDB database (not JazzDashShared — that one's version is
+// depended on by every dashboard's own hand-off code, so it's left alone)
+// keyed by Drive file id, storing the file's bytes alongside the
+// `modifiedTime` Drive reported when they were fetched. Before downloading,
+// each file's CURRENT `modifiedTime` (from listDriveExcelFiles, a cheap
+// metadata-only call) is compared to the cached one — a match means the
+// file hasn't changed on Drive since last time, so the cached bytes are
+// reused instead of downloading the whole file again. Cache entries have no
+// expiry; a changed file simply gets a different modifiedTime and is
+// re-downloaded and re-cached automatically.
+const JAZZ_CACHE_DB = "JazzDashDriveCache";
+const JAZZ_CACHE_STORE = "files";
+function driveCacheOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(JAZZ_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(JAZZ_CACHE_STORE)) req.result.createObjectStore(JAZZ_CACHE_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function driveCacheGet(fileId) {
+  try {
+    const db = await driveCacheOpen();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(JAZZ_CACHE_STORE, "readonly").objectStore(JAZZ_CACHE_STORE).get(fileId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) { return null; } // caching is a pure optimization — never let it block a download
+}
+async function driveCacheSet(fileId, entry) {
+  try {
+    const db = await driveCacheOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(JAZZ_CACHE_STORE, "readwrite");
+      tx.objectStore(JAZZ_CACHE_STORE).put(entry, fileId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { /* non-fatal — just means no cache hit next time */ }
+}
+
+// Returns { file: File, fromCache: boolean }.
 async function downloadDriveFile(file) {
+  const cached = await driveCacheGet(file.id);
+  if (cached && cached.modifiedTime === file.modifiedTime) {
+    return { file: new File([cached.blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fromCache: true };
+  }
   const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!resp.ok) throw new Error(`Couldn't download "${file.name}" (${resp.status})`);
   const blob = await resp.blob();
-  return new File([blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  await driveCacheSet(file.id, { modifiedTime: file.modifiedTime, name: file.name, blob });
+  return { file: new File([blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fromCache: false };
 }
 
 async function openDashboardFromDrive(dash, folderId) {
@@ -771,23 +823,27 @@ async function openDashboardFromDrive(dash, folderId) {
     setStatus(`No .xlsx files found in the "${dash.driveFolderName}" Drive folder.`, true);
     return;
   }
-  let done = 0;
+  let done = 0, cachedCount = 0;
   setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (0/${driveFiles.length})`);
   // All files download in parallel (one request each, all in flight at once)
   // instead of one-at-a-time — with only a handful of files per folder this
-  // turns N sequential round-trips into roughly one.
-  const files = (await Promise.all(driveFiles.map(async (f) => {
+  // turns N sequential round-trips into roughly one. Files that haven't
+  // changed since last time skip the download entirely (see the cache
+  // above), so a repeat open of the same folder can be near-instant.
+  const results = (await Promise.all(driveFiles.map(async (f) => {
     try {
-      const file = await downloadDriveFile(f);
+      const result = await downloadDriveFile(f);
       done++;
-      setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (${done}/${driveFiles.length})`);
-      return file;
+      if (result.fromCache) cachedCount++;
+      setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (${done}/${driveFiles.length}${cachedCount ? `, ${cachedCount} from cache` : ""})`);
+      return result;
     } catch (err) {
       console.warn(err.message);
       done++;
       return null;
     }
   }))).filter(Boolean);
+  const files = results.map((r) => r.file);
   if (!files.length) {
     setStatus("Couldn't download the files from Drive — try again.", true);
     return;
