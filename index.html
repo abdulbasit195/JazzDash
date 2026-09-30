@@ -30,11 +30,18 @@
        screen is in "Testing" status, only emails on the Test Users list
        can sign in (a Google-side gate, nothing here enforces it). After
        sign-in, only the dashboards whose Drive folder the person can see
-       are shown (checked with drive.metadata.readonly — folder names
-       only, this page never reads any file's actual contents). The
-       token is cached in sessionStorage for this tab only, so using the
-       browser Back button to return here after opening a dashboard
-       skips the sign-in screen; it's cleared on sign-out or tab close.
+       are shown. Clicking one of those buttons downloads every .xlsx
+       file directly out of that Drive folder (Drive API, read-only —
+       this page never writes anything back to Drive) and hands them to
+       the dashboard the same way a local pick does (the shared
+       IndexedDB "JazzDashShared" hand-off — see point 1), so the
+       dashboard opens with the real Drive data already loaded, no local
+       picker involved. Saves inside the dashboard still only save to an
+       in-memory copy / download, since round-tripping edits back up to
+       Drive isn't wired up (yet). The sign-in token is cached in
+       sessionStorage for this tab only, so using the browser Back button
+       to return here after opening a dashboard skips the sign-in screen;
+       it's cleared on sign-out or tab close.
 
   TO ADD A NEW DASHBOARD: add one entry to DASHBOARDS below — its page,
   its Drive folder name (for the login flow), and its `detect`
@@ -346,10 +353,10 @@ const MIN_DETECT_SCORE = 3;
 
 // Where the Google sign-in token is cached for this tab, so coming back to
 // this page (e.g. the browser Back button from a dashboard) can skip the
-// sign-in screen. Scope stays metadata-only (see initGoogle below), so this
-// token is only ever used to re-check folder visibility — never to read or
-// write any file's actual contents.
+// sign-in screen. See initGoogle below for what this token can do.
 const JAZZDASH_TOKEN_KEY = "jazzdash_google_token";
+// How many .xlsx files to pull out of a single Drive folder in one go.
+const MAX_DRIVE_FILES = 25;
 
 // =============================================================================
 
@@ -611,10 +618,12 @@ function initGoogle() {
   }
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
-    // metadata.readonly is enough to check folder VISIBILITY by name — this
-    // page never reads or downloads any file's actual contents, and kept
-    // deliberately narrow since no dashboard currently reuses this token.
-    scope: "https://www.googleapis.com/auth/drive.metadata.readonly " +
+    // drive.readonly (not just drive.metadata.readonly): this page both
+    // checks folder VISIBILITY by name, and — once a dashboard is picked —
+    // downloads that folder's .xlsx files so the dashboard has something to
+    // open. Still read-only: nothing here can create, edit or delete
+    // anything in Drive.
+    scope: "https://www.googleapis.com/auth/drive.readonly " +
            "https://www.googleapis.com/auth/userinfo.email " +
            "https://www.googleapis.com/auth/userinfo.profile",
     callback: async (resp) => {
@@ -681,10 +690,14 @@ async function afterSignIn() {
   renderUserChip();
   setStatus("Checking which dashboards are shared with you…");
 
+  // dashboard id -> the Drive folder id that gated it, so the click handler
+  // below knows exactly which folder to pull files from.
   const accessible = [];
+  const folderIdFor = {};
   for (const d of DASHBOARDS) {
     try {
-      if (await canSeeDriveFolder(d.driveFolderName)) accessible.push(d);
+      const folder = await findDriveFolder(d.driveFolderName);
+      if (folder) { accessible.push(d); folderIdFor[d.id] = folder.id; }
     } catch (err) {
       console.warn(`Could not check Drive access for "${d.driveFolderName}":`, err);
     }
@@ -694,10 +707,13 @@ async function afterSignIn() {
   const emptyNote = document.getElementById("dashEmptyNote");
   if (accessible.length) {
     dashButtons.innerHTML = accessible.map(
-      (d) => `<button type="button" class="btn btn-primary" data-url="${d.url}" style="box-shadow:none;">${escapeHtml(d.label)}</button>`
+      (d) => `<button type="button" class="btn btn-primary" data-id="${d.id}" style="box-shadow:none;">${escapeHtml(d.label)}</button>`
     ).join("");
-    dashButtons.querySelectorAll("[data-url]").forEach((btn) => {
-      btn.addEventListener("click", () => { window.location.href = btn.getAttribute("data-url"); });
+    dashButtons.querySelectorAll("[data-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const d = DASHBOARDS.find((x) => x.id === btn.getAttribute("data-id"));
+        openDashboardFromDrive(d, folderIdFor[d.id]);
+      });
     });
     emptyNote.style.display = "none";
   } else {
@@ -709,15 +725,70 @@ async function afterSignIn() {
   showPanel(dashPanel);
 }
 
-// True if the signed-in user can see at least one Drive folder with this
-// exact name — Drive only returns folders they own or have been shared.
-async function canSeeDriveFolder(folderName) {
+// The signed-in user's own Drive folder with this exact name, or null —
+// Drive only returns folders they own or have been shared with them.
+async function findDriveFolder(folderName) {
   const q = `mimeType='application/vnd.google-apps.folder' and name='${folderName.replace(/'/g, "\\'")}' and trashed=false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=1&fields=files(id,name)`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!resp.ok) throw new Error(`Drive check failed (${resp.status})`);
   const data = await resp.json();
-  return Array.isArray(data.files) && data.files.length > 0;
+  return (Array.isArray(data.files) && data.files[0]) || null;
+}
+
+// ------------------------------------------------------- drive hand-off --
+// Downloads every .xlsx file directly inside a Drive folder and hands them
+// to the dashboard exactly like a local "blobs" pick (see handOff() above)
+// — the dashboard's existing JAZZ DASH HANDOFF receiver reads this kind of
+// record already, so no dashboard-side change was needed for this to work.
+async function listDriveExcelFiles(folderId) {
+  const q = `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=${MAX_DRIVE_FILES}&fields=files(id,name,modifiedTime)`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) throw new Error(`Couldn't list Drive files (${resp.status})`);
+  const data = await resp.json();
+  return (data.files || []).filter((f) => isExcel(f.name));
+}
+async function downloadDriveFile(file) {
+  const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) throw new Error(`Couldn't download "${file.name}" (${resp.status})`);
+  const blob = await resp.blob();
+  return new File([blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+async function openDashboardFromDrive(dash, folderId) {
+  if (!folderId) { setStatus("Couldn't find that Drive folder.", true); return; }
+  setStatus(`Reading "${dash.driveFolderName}" from Drive…`);
+  let driveFiles;
+  try {
+    driveFiles = await listDriveExcelFiles(folderId);
+  } catch (err) {
+    setStatus("Couldn't list files in that Drive folder: " + err.message, true);
+    return;
+  }
+  if (!driveFiles.length) {
+    setStatus(`No .xlsx files found in the "${dash.driveFolderName}" Drive folder.`, true);
+    return;
+  }
+  setStatus(`Downloading ${driveFiles.length} file(s) from Drive…`);
+  const files = [];
+  for (const f of driveFiles) {
+    try { files.push(await downloadDriveFile(f)); }
+    catch (err) { console.warn(err.message); }
+  }
+  if (!files.length) {
+    setStatus("Couldn't download the files from Drive — try again.", true);
+    return;
+  }
+  try {
+    await jazzPutSession(dash.id, { kind: "blobs", label: dash.driveFolderName, files, savedAt: Date.now() });
+  } catch (err) {
+    setStatus("Couldn't hand the files over to the dashboard: " + err.message, true);
+    return;
+  }
+  setStatus(`Opening in ${dash.label}…`);
+  window.location.href = dash.url;
 }
 
 function renderUserChip() {
