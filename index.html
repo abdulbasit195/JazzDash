@@ -3,40 +3,57 @@
   =============================================================================
   JAZZ DASH — home / login page for the JazzDash repo
   =============================================================================
-  This page is the front door for every dashboard tool in this repo. It does
-  three things:
+  The front door for every dashboard in this repo (Compliance Dash, Audit
+  Dash, ...). Dashboard pages have no login and no file pickers of their
+  own — everything starts here.
 
-    1. Shows three buttons in a red-neon-bordered box: "Open folder locally"
-       and "Open file locally" (no login — these just jump straight to a
-       chosen dashboard's own page, where that dashboard's own folder/file
-       picker takes over) and "Login to Jazz Dash" (Google sign-in).
+    1. "Open folder locally" / "Open file locally" (no login needed)
+       -> the picker opens straight away (asking for read+write access in
+          the same click, so a later save doesn't need a second prompt)
+       -> this page reads just the header rows of each picked Excel file
+          and scores them against each dashboard's fingerprint
+          (DASHBOARDS[].detect below)
+       -> a pick can contain files for more than one dashboard at once
+          (e.g. a mixed folder): each file is classified on its own, then
+          grouped by dashboard. One group -> that dashboard opens
+          directly. More than one group, or files we can't place with
+          confidence -> you're asked which dashboard/group to open.
+       -> the picked handle(s) are also saved to a shared IndexedDB
+          database ("JazzDashShared") under the dashboard's id, so a
+          dashboard page can pick the same file/folder back up without
+          asking again, IF that dashboard has been given the small
+          receiver snippet for it. As shipped, none of the dashboard
+          pages read this yet, so today you'll just be asked to pick the
+          file again on the dashboard — see "TO ADD A NEW DASHBOARD".
 
-    2. After Google sign-in succeeds, Google itself has already gated WHO can
-       get this far — while this app's OAuth consent screen is in "Testing"
-       status in Google Cloud Console, only emails on the Test Users list can
-       complete sign-in at all. Nothing in this file enforces that; it's a
-       Google-side gate.
+    2. "Login to Jazz Dash" -> Google sign-in. While the OAuth consent
+       screen is in "Testing" status, only emails on the Test Users list
+       can sign in (a Google-side gate, nothing here enforces it). After
+       sign-in, only the dashboards whose Drive folder the person can see
+       are shown (checked with drive.metadata.readonly — folder names
+       only, this page never reads any file's actual contents). The
+       token is cached in sessionStorage for this tab only, so using the
+       browser Back button to return here after opening a dashboard
+       skips the sign-in screen; it's cleared on sign-out or tab close.
 
-    3. Once signed in, this page checks — using the signed-in person's own
-       Drive access token — which of the known dashboards' Drive folders
-       they can actually see (a plain Drive "files.list" search by folder
-       name, scoped to drive.metadata.readonly — read-only metadata, no file
-       contents ever touched). Only the dashboards whose Drive folder is
-       visible to them get shown as buttons. Whoever owns those Drive
-       folders controls dashboard access just by sharing/unsharing the
-       folder — no separate permissions system to maintain here.
+  TO ADD A NEW DASHBOARD: add one entry to DASHBOARDS below — its page,
+  its Drive folder name (for the login flow), and its `detect`
+  fingerprint (for the local-open flow). To make that dashboard receive a
+  locally-picked file/folder directly instead of asking again, add a
+  small "JAZZ DASH HANDOFF (receiver)" snippet to its page that reads
+  IndexedDB "JazzDashShared" / store "sessions" / key = the dashboard's
+  `id` (record shape is written by handOff() below) — until that
+  snippet exists on a given dashboard page, that dashboard just gets a
+  normal navigation and its own picker runs again there. Nothing else in
+  this file needs to change either way.
 
-  TO ADD A NEW DASHBOARD LATER: add one entry to the DASHBOARDS array below
-  (folder name in Drive + the label + the html file to open), and share a
-  same-named Drive folder with whoever should see it. That's the whole
-  process — no other code changes needed.
+  TO ADD/REMOVE A TEST USER: Google Cloud Console -> APIs & Services ->
+  OAuth consent screen -> Test users. Takes effect immediately, no
+  redeploy.
 
-  TO ADD/REMOVE A TEST USER: Google Cloud Console → APIs & Services → OAuth
-  consent screen → Test users. Takes effect immediately, no redeploy needed.
-
-  Before this works on your real GitHub Pages URL, add that URL (e.g.
-  https://<you>.github.io) as an "Authorized JavaScript origin" on this
-  OAuth Client ID in Google Cloud Console → APIs & Services → Credentials.
+  The GitHub Pages URL must be an "Authorized JavaScript origin" on the
+  OAuth Client ID (Google Cloud Console -> APIs & Services ->
+  Credentials).
   =============================================================================
 -->
 <html lang="en">
@@ -48,6 +65,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- SheetJS — only used to peek at header rows so the right dashboard can be
+     picked automatically. The dashboards do their own full reading. Loaded
+     from a CDN so nothing extra needs to be committed to this repo; swap
+     for a local copy (e.g. src="xlsx.full.min.js") if you'd rather this
+     page work offline / without CDN access. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --ink-900:#0B0908;
@@ -73,7 +96,7 @@ body{
   align-items:center;
   justify-content:center;
   min-height:100vh;
-  padding:24px;
+  padding:24px 16px;
 }
 
 .frame{
@@ -94,6 +117,7 @@ body{
   gap:10px;
   animation:pulse-glow 3.6s ease-in-out infinite;
 }
+@media (max-width:420px){ .frame{ padding:36px 22px 30px; } }
 @keyframes pulse-glow{
   0%,100%{ box-shadow:0 0 18px var(--red-glow), 0 0 46px rgba(226,67,74,.28), 0 0 90px rgba(226,67,74,.14), inset 0 0 30px rgba(226,67,74,.06); }
   50%{ box-shadow:0 0 26px var(--red-glow), 0 0 64px rgba(226,67,74,.38), 0 0 120px rgba(226,67,74,.2), inset 0 0 38px rgba(226,67,74,.09); }
@@ -130,6 +154,7 @@ body{
 }
 .btn:hover{ transform:translateY(-1px); }
 .btn:active{ transform:translateY(0); }
+.btn:disabled{ opacity:.5; cursor:default; transform:none; }
 
 .btn-ghost{
   background:transparent;
@@ -147,6 +172,24 @@ body{
   box-shadow:0 0 16px rgba(226,67,74,.45);
 }
 .btn-primary:hover{ background:#ef5158; box-shadow:0 0 26px rgba(226,67,74,.65); }
+
+.btn .sub{
+  display:block;
+  font-family:'IBM Plex Mono', monospace;
+  font-size:10.5px;
+  font-weight:400;
+  letter-spacing:.04em;
+  color:var(--text-lo);
+  margin-top:4px;
+}
+.btn .tag{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:10px;
+  letter-spacing:.06em;
+  color:var(--red);
+  margin-left:8px;
+}
+.btn-suggested{ border-color:var(--red); }
 
 .divider{
   width:100%;
@@ -179,10 +222,13 @@ body{
 }
 .sub-panel .back-link:hover{ color:var(--text-hi); }
 .sub-panel .prompt{
-  font-size:12.5px;
-  color:var(--text-lo);
+  font-size:13px;
+  color:var(--text-hi);
+  line-height:1.5;
   margin-bottom:2px;
 }
+.sub-panel .prompt .muted{ color:var(--text-lo); font-size:12px; display:block; margin-top:4px; }
+.sub-panel .prompt b{ color:var(--text-hi); }
 
 .user-chip{
   display:flex; align-items:center; gap:10px;
@@ -206,6 +252,7 @@ body{
   text-align:center;
   min-height:16px;
   margin-top:4px;
+  line-height:1.5;
 }
 .status-line.err{ color:var(--red); }
 
@@ -232,7 +279,7 @@ body{
     <button type="button" class="btn btn-primary" id="loginBtn">Login to Jazz Dash</button>
   </div>
 
-  <!-- ===================== "WHICH DASHBOARD" PANEL (local open flow) ===================== -->
+  <!-- ===================== "WHICH DASHBOARD" PANEL (only when detection isn't sure) ===================== -->
   <div id="pickerPanel" class="sub-panel" style="display:none;">
     <div class="back-link" id="pickerBack">&larr; Back</div>
     <div class="prompt" id="pickerPrompt"></div>
@@ -249,6 +296,11 @@ body{
   </div>
 
   <div class="status-line" id="statusLine"></div>
+
+  <!-- Fallbacks for browsers without folder/file access (Firefox, Safari):
+       files open read-only there, and saves download an updated copy. -->
+  <input type="file" id="folderInputFallback" webkitdirectory multiple style="display:none;">
+  <input type="file" id="fileInputFallback" accept=".xlsx" multiple style="display:none;">
 </div>
 
 <script>
@@ -257,13 +309,47 @@ body{
 // =============================================================================
 const GOOGLE_CLIENT_ID = "266151179037-31hb7cd1rug94o423ab4kbonrqcfo060.apps.googleusercontent.com";
 
-// One entry per dashboard. `driveFolderName` must exactly match the name of
-// a real Drive folder that dashboard's data lives in — whoever owns that
-// folder controls who sees this button just by sharing/unsharing it.
+// One entry per dashboard.
+//   id              — must match the id used by that dashboard's own
+//                     "JAZZ DASH HANDOFF (receiver)" snippet, once it has one
+//   driveFolderName — exact name of the Drive folder that gates the login flow
+//   detect          — the fingerprint used to recognise its Excel files:
+//       headers: words/phrases to look for in the first rows of every tab,
+//                with a weight (something that only ever appears in this
+//                dashboard's files gets a high weight)
+//       sheets:  tab names typical of this dashboard's files
+//     A file goes to the dashboard with the highest score, as long as it
+//     scores at least MIN_DETECT_SCORE and beats every other dashboard.
 const DASHBOARDS = [
-  { driveFolderName: "Compliance",     label: "Compliance Dash", url: "compliance_dashboard.html" },
-  { driveFolderName: "Internal Audit", label: "Audit Dash",      url: "audit_dashboard.html" },
+  {
+    id: "compliance", label: "Compliance Dash", url: "compliance_dashboard.html", driveFolderName: "Compliance",
+    detect: {
+      headers: {
+        "brief": 4, "relevant department": 1, "department": 1,
+        "compliance status": 2, "ia validation": 1, "internal audit validation": 1,
+      },
+      sheets: ["so", "sso", "annexure", "appendix"],
+    },
+  },
+  {
+    id: "audit", label: "Audit Dash", url: "audit_dashboard.html", driveFolderName: "Internal Audit",
+    detect: {
+      headers: {
+        "audit period": 3, "report name": 2, "total observation": 3, "open observation": 2,
+        "close observation": 2, "observation severity": 2, "dependent team": 1, "team name": 1,
+      },
+      sheets: [],
+    },
+  },
 ];
+const MIN_DETECT_SCORE = 3;
+
+// Where the Google sign-in token is cached for this tab, so coming back to
+// this page (e.g. the browser Back button from a dashboard) can skip the
+// sign-in screen. Scope stays metadata-only (see initGoogle below), so this
+// token is only ever used to re-check folder visibility — never to read or
+// write any file's actual contents.
+const JAZZDASH_TOKEN_KEY = "jazzdash_google_token";
 
 // =============================================================================
 
@@ -279,29 +365,241 @@ function setStatus(msg, isError) {
   statusLine.textContent = msg || "";
   statusLine.classList.toggle("err", !!isError);
 }
+function setHomeBusy(busy) {
+  homePanel.querySelectorAll("button").forEach((b) => { b.disabled = busy; });
+}
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function isExcel(name) { return /\.xlsx$/i.test(name) && !name.startsWith("~$"); } // ~$ = Excel's own lock files
 
-// --------------------------------------------------- "open locally" flow --
-// File System Access API pickers need a direct user click to work, and that
-// permission doesn't carry across a page navigation — so rather than try to
-// auto-trigger a dashboard's picker from here (which browsers will reliably
-// block), this just jumps to the chosen dashboard's own page, where its own
-// "Choose folder" / "Open file(s)" button is one more real click away.
-function openPickerFor(mode) {
-  document.getElementById("pickerPrompt").textContent =
-    mode === "folder" ? "Open a folder in which dashboard?" : "Open a file in which dashboard?";
-  document.getElementById("pickerButtons").innerHTML = DASHBOARDS.map(
-    (d) => `<button type="button" class="btn btn-ghost" data-url="${d.url}">${d.label}</button>`
-  ).join("");
-  document.getElementById("pickerButtons").querySelectorAll("[data-url]").forEach((btn) => {
-    btn.addEventListener("click", () => { window.location.href = btn.getAttribute("data-url"); });
+// =============================================================================
+// OPEN LOCALLY — pick, detect, hand over
+// =============================================================================
+// A "picked" object is: { kind: "folder"|"handles"|"blobs", label,
+//   dirHandle?, entries: [{ name, getFile(), handle?, file? }] }
+
+document.getElementById("openFolderBtn").addEventListener("click", async () => {
+  setStatus("");
+  if (typeof window.showDirectoryPicker !== "function") {
+    document.getElementById("folderInputFallback").click();
+    return;
+  }
+  let dirHandle;
+  try {
+    // readwrite up front: one "allow editing" prompt now, so saves in the
+    // dashboard go straight through without asking again.
+    dirHandle = await window.showDirectoryPicker({ id: "jazzdash", mode: "readwrite" });
+  } catch (err) {
+    if (err.name !== "AbortError") setStatus("Couldn't open that folder: " + err.message, true);
+    return;
+  }
+  const entries = [];
+  for await (const [name, h] of dirHandle.entries()) {
+    if (h.kind === "file" && isExcel(name)) entries.push({ name, handle: h, getFile: () => h.getFile() });
+  }
+  await detectAndRoute({ kind: "folder", label: dirHandle.name, dirHandle, entries });
+});
+
+document.getElementById("openFileBtn").addEventListener("click", async () => {
+  setStatus("");
+  if (typeof window.showOpenFilePicker !== "function") {
+    document.getElementById("fileInputFallback").click();
+    return;
+  }
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({
+      id: "jazzdash",
+      multiple: true,
+      types: [{ description: "Excel workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+    });
+  } catch (err) {
+    if (err.name !== "AbortError") setStatus("Couldn't open that file: " + err.message, true);
+    return;
+  }
+  // showOpenFilePicker (unlike showDirectoryPicker) has no "mode" option, so
+  // write access has to be requested per handle, right away in this same
+  // click, so a later save in the dashboard doesn't hit a second prompt.
+  for (const h of handles) {
+    try { await h.requestPermission({ mode: "readwrite" }); } catch (err) { /* best-effort; dashboard falls back to read-only / download-a-copy */ }
+  }
+  const entries = handles.filter((h) => isExcel(h.name)).map((h) => ({ name: h.name, handle: h, getFile: () => h.getFile() }));
+  await detectAndRoute({ kind: "handles", label: entries.length === 1 ? entries[0].name : `${entries.length} files`, entries });
+});
+
+// Browsers without the File System Access API: plain File objects.
+function pickedFromFileList(fileList, isFolder) {
+  const files = Array.from(fileList || []).filter((f) => isExcel(f.name) && (!isFolder || !/\//.test(stripTopFolder(f))));
+  const topFolder = isFolder && fileList.length ? (fileList[0].webkitRelativePath || "").split("/")[0] : "";
+  return {
+    kind: "blobs",
+    label: isFolder ? (topFolder || "folder") : (files.length === 1 ? files[0].name : `${files.length} files`),
+    entries: files.map((f) => ({ name: f.name, file: f, getFile: async () => f })),
+  };
+}
+function stripTopFolder(f) { return (f.webkitRelativePath || f.name).split("/").slice(1).join("/"); } // only the folder's own files, not subfolders
+document.getElementById("folderInputFallback").addEventListener("change", (e) => {
+  if (e.target.files.length) detectAndRoute(pickedFromFileList(e.target.files, true));
+  e.target.value = "";
+});
+document.getElementById("fileInputFallback").addEventListener("change", (e) => {
+  if (e.target.files.length) detectAndRoute(pickedFromFileList(e.target.files, false));
+  e.target.value = "";
+});
+
+// ---------------------------------------------------------------- detection --
+// Reads only the first few rows of every tab (fast even for big files) and
+// scores the file against each dashboard's fingerprint.
+async function readFingerprint(entry) {
+  const buf = await (await entry.getFile()).arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", sheetRows: 15 });
+  const headerText = [];
+  wb.SheetNames.forEach((sn) => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "" });
+    rows.forEach((r) => r.forEach((c) => { if (c !== "" && c != null) headerText.push(String(c).toLowerCase().replace(/\s+/g, " ").trim()); }));
   });
+  return { sheetNames: wb.SheetNames.map((s) => s.toLowerCase().trim()), headerText };
+}
+function scoreAgainst(fp, dash) {
+  let score = 0;
+  Object.entries(dash.detect.headers || {}).forEach(([word, weight]) => {
+    if (fp.headerText.some((h) => h.includes(word))) score += weight;
+  });
+  let sheetHits = 0;
+  (dash.detect.sheets || []).forEach((s) => {
+    if (fp.sheetNames.some((n) => n === s || n.startsWith(s + " ") || n.startsWith(s + "-"))) sheetHits++;
+  });
+  return score + Math.min(sheetHits, 2);
+}
+function classify(fp) {
+  const scored = DASHBOARDS.map((d) => ({ d, s: scoreAgainst(fp, d) })).sort((a, b) => b.s - a.s);
+  const best = scored[0], second = scored[1];
+  if (!best || best.s < MIN_DETECT_SCORE) return null;
+  if (second && second.s === best.s) return null; // a tie means we genuinely can't tell
+  return best.d.id;
+}
+
+async function detectAndRoute(picked) {
+  if (!picked.entries.length) {
+    setStatus(picked.kind === "folder" ? `No Excel (.xlsx) files in "${picked.label}".` : "No Excel (.xlsx) file was picked.", true);
+    return;
+  }
+  setHomeBusy(true);
+  setStatus(`Reading ${picked.entries.length} file(s) to find the right dashboard…`);
+
+  const groups = {};   // dashboard id -> [file names]
+  const unknown = [];
+  const detectionAvailable = typeof XLSX !== "undefined";
+  for (const entry of picked.entries) {
+    let id = null;
+    if (detectionAvailable) {
+      try { id = classify(await readFingerprint(entry)); } catch (err) { console.warn(`Couldn't read "${entry.name}":`, err); }
+    }
+    if (id) (groups[id] = groups[id] || []).push(entry.name); else unknown.push(entry.name);
+  }
+  setHomeBusy(false);
+
+  const ids = Object.keys(groups);
+  if (ids.length === 1) {
+    // One clear answer: go straight there. Unrecognised files in the same
+    // folder/pick ride along (they'll just show as having nothing to read).
+    const dash = DASHBOARDS.find((d) => d.id === ids[0]);
+    await handOff(picked, dash, null);
+    return;
+  }
+  showDashboardChooser(picked, groups, unknown, detectionAvailable);
+}
+
+function showDashboardChooser(picked, groups, unknown, detectionAvailable) {
+  const ids = Object.keys(groups);
+  const prompt = document.getElementById("pickerPrompt");
+  const btnWrap = document.getElementById("pickerButtons");
+  let options;
+  if (ids.length > 1) {
+    prompt.innerHTML = `These files belong to more than one dashboard. Which set do you want to open?` +
+      (unknown.length ? `<span class="muted">${unknown.length} file(s) weren't recognised and are left out.</span>` : "");
+    options = ids.map((id) => {
+      const d = DASHBOARDS.find((x) => x.id === id);
+      return { dash: d, names: groups[id], sub: `${groups[id].length} file(s): ${groups[id].slice(0, 2).join(", ")}${groups[id].length > 2 ? "…" : ""}`, suggested: true };
+    });
+  } else {
+    prompt.innerHTML = detectionAvailable
+      ? `Couldn't tell which dashboard ${picked.entries.length === 1 ? "this file is" : "these files are"} for. Open in:`
+      : `Open ${picked.entries.length === 1 ? "this file" : "these files"} in:`;
+    options = DASHBOARDS.map((d) => ({ dash: d, names: null, sub: "", suggested: false }));
+  }
+  btnWrap.innerHTML = options.map((o, i) => {
+    const suggested = o.suggested && i === 0;
+    return `<button type="button" class="btn btn-ghost ${suggested ? "btn-suggested" : ""}" data-idx="${i}">${escapeHtml(o.dash.label)}${suggested ? '<span class="tag">BEST MATCH</span>' : ""}${o.sub ? `<span class="sub">${escapeHtml(o.sub)}</span>` : ""}</button>`;
+  }).join("");
+  btnWrap.querySelectorAll("[data-idx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const o = options[Number(btn.getAttribute("data-idx"))];
+      handOff(picked, o.dash, o.names);
+    });
+  });
+  setStatus("");
   showPanel(pickerPanel);
 }
-document.getElementById("openFolderBtn").addEventListener("click", () => openPickerFor("folder"));
-document.getElementById("openFileBtn").addEventListener("click", () => openPickerFor("file"));
+
+// ------------------------------------------------------------------ handoff --
+// Stores what was picked under the dashboard's id in a shared IndexedDB
+// database, then opens the dashboard page. A dashboard picks this up only
+// if it has a matching "JAZZ DASH HANDOFF (receiver)" snippet (see the
+// header comment) — until then this is just a forward-compatible record and
+// the dashboard's own picker runs again on arrival.
+// `onlyNames` limits which files go (used when a pick spanned dashboards).
+const JAZZ_DB_NAME = "JazzDashShared";
+const JAZZ_STORE = "sessions";
+function jazzIdbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(JAZZ_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(JAZZ_STORE)) req.result.createObjectStore(JAZZ_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function jazzPutSession(id, record) {
+  const db = await jazzIdbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(JAZZ_STORE, "readwrite");
+    tx.objectStore(JAZZ_STORE).put(record, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function handOff(picked, dash, onlyNames) {
+  const keep = onlyNames ? new Set(onlyNames) : null;
+  const entries = picked.entries.filter((e) => !keep || keep.has(e.name));
+  const record = { kind: picked.kind, label: picked.label, savedAt: Date.now() };
+  if (picked.kind === "folder") {
+    record.dirHandle = picked.dirHandle;
+    record.names = onlyNames || null; // null = every Excel file in the folder, including ones added later
+  } else if (picked.kind === "handles") {
+    record.handles = entries.map((e) => e.handle);
+  } else {
+    record.files = entries.map((e) => e.file);
+  }
+  try {
+    await jazzPutSession(dash.id, record);
+  } catch (err) {
+    // Non-fatal — the dashboard's own picker still works, it just means the
+    // hand-off record wasn't saved for a future receiver snippet to use.
+    console.warn("Couldn't save the hand-off record:", err);
+  }
+  setStatus(`Opening in ${dash.label}…`);
+  window.location.href = dash.url;
+}
+
 document.getElementById("pickerBack").addEventListener("click", () => { showPanel(homePanel); setStatus(""); });
 
-// --------------------------------------------------------- Google sign-in --
+// =============================================================================
+// GOOGLE SIGN-IN
+// =============================================================================
 let tokenClient = null;
 let currentUser = null;   // {name, email, picture}
 let accessToken = null;
@@ -314,7 +612,8 @@ function initGoogle() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     // metadata.readonly is enough to check folder VISIBILITY by name — this
-    // page never reads or downloads any file's actual contents.
+    // page never reads or downloads any file's actual contents, and kept
+    // deliberately narrow since no dashboard currently reuses this token.
     scope: "https://www.googleapis.com/auth/drive.metadata.readonly " +
            "https://www.googleapis.com/auth/userinfo.email " +
            "https://www.googleapis.com/auth/userinfo.profile",
@@ -324,16 +623,44 @@ function initGoogle() {
         return;
       }
       accessToken = resp.access_token;
+      saveCachedToken(resp);
       await afterSignIn();
     },
   });
 }
 window.addEventListener("load", initGoogle);
 
+function saveCachedToken(resp) {
+  try {
+    sessionStorage.setItem(JAZZDASH_TOKEN_KEY, JSON.stringify({
+      token: resp.access_token,
+      expiresAt: Date.now() + (Number(resp.expires_in) || 3600) * 1000,
+    }));
+  } catch (e) { /* sessionStorage blocked — sign-in will just be asked for again */ }
+}
+function readCachedToken() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(JAZZDASH_TOKEN_KEY) || "null");
+    if (!saved || !saved.token || Date.now() > saved.expiresAt - 60 * 1000) return null;
+    return saved.token;
+  } catch (e) { return null; }
+}
+
 document.getElementById("loginBtn").addEventListener("click", () => {
   if (!tokenClient) { setStatus("Google Sign-In is still loading — try again in a moment.", true); return; }
   setStatus("Opening Google sign-in…");
   tokenClient.requestAccessToken({ prompt: "" });
+});
+
+// Coming back to this page in the same tab (e.g. the browser Back button
+// from a dashboard) while the cached token is still valid: skip straight
+// past the sign-in screen instead of asking again.
+window.addEventListener("DOMContentLoaded", () => {
+  const token = readCachedToken();
+  if (token) {
+    accessToken = token;
+    afterSignIn();
+  }
 });
 
 async function afterSignIn() {
@@ -345,6 +672,8 @@ async function afterSignIn() {
     if (!userResp.ok) throw new Error("Could not read your Google profile.");
     currentUser = await userResp.json();
   } catch (err) {
+    try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); } catch (e) {}
+    accessToken = null;
     setStatus(err.message || "Sign-in failed.", true);
     return;
   }
@@ -365,7 +694,7 @@ async function afterSignIn() {
   const emptyNote = document.getElementById("dashEmptyNote");
   if (accessible.length) {
     dashButtons.innerHTML = accessible.map(
-      (d) => `<button type="button" class="btn btn-primary" data-url="${d.url}" style="box-shadow:none;">${d.label}</button>`
+      (d) => `<button type="button" class="btn btn-primary" data-url="${d.url}" style="box-shadow:none;">${escapeHtml(d.label)}</button>`
     ).join("");
     dashButtons.querySelectorAll("[data-url]").forEach((btn) => {
       btn.addEventListener("click", () => { window.location.href = btn.getAttribute("data-url"); });
@@ -380,10 +709,8 @@ async function afterSignIn() {
   showPanel(dashPanel);
 }
 
-// Returns true if the signed-in user can see AT LEAST ONE Drive folder with
-// this exact name — a plain metadata search using their own access token,
-// scoped to drive.metadata.readonly. Drive itself only returns folders the
-// user owns or has been shared, so this is the entire access check.
+// True if the signed-in user can see at least one Drive folder with this
+// exact name — Drive only returns folders they own or have been shared.
 async function canSeeDriveFolder(folderName) {
   const q = `mimeType='application/vnd.google-apps.folder' and name='${folderName.replace(/'/g, "\\'")}' and trashed=false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=1&fields=files(id,name)`;
@@ -406,16 +733,14 @@ function renderUserChip() {
   document.getElementById("signOutBtn").addEventListener("click", signOut);
 }
 function signOut() {
-  if (accessToken && google.accounts.oauth2.revoke) {
+  if (accessToken && typeof google !== "undefined" && google.accounts && google.accounts.oauth2.revoke) {
     google.accounts.oauth2.revoke(accessToken, () => {});
   }
+  try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); } catch (e) {}
   accessToken = null;
   currentUser = null;
   setStatus("");
   showPanel(homePanel);
-}
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 </script>
 </body>
