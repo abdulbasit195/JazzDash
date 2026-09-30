@@ -771,12 +771,23 @@ async function openDashboardFromDrive(dash, folderId) {
     setStatus(`No .xlsx files found in the "${dash.driveFolderName}" Drive folder.`, true);
     return;
   }
-  setStatus(`Downloading ${driveFiles.length} file(s) from Drive…`);
-  const files = [];
-  for (const f of driveFiles) {
-    try { files.push(await downloadDriveFile(f)); }
-    catch (err) { console.warn(err.message); }
-  }
+  let done = 0;
+  setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (0/${driveFiles.length})`);
+  // All files download in parallel (one request each, all in flight at once)
+  // instead of one-at-a-time — with only a handful of files per folder this
+  // turns N sequential round-trips into roughly one.
+  const files = (await Promise.all(driveFiles.map(async (f) => {
+    try {
+      const file = await downloadDriveFile(f);
+      done++;
+      setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (${done}/${driveFiles.length})`);
+      return file;
+    } catch (err) {
+      console.warn(err.message);
+      done++;
+      return null;
+    }
+  }))).filter(Boolean);
   if (!files.length) {
     setStatus("Couldn't download the files from Drive — try again.", true);
     return;
