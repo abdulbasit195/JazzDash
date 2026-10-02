@@ -2343,26 +2343,27 @@ applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "li
 // JAZZ DASH HANDOFF (receiver) — how files get into this dashboard
 // =============================================================================
 // This page never shows a file/folder picker of its own, and no longer has
-// its own Google sign-in. The Jazz Dash home page (index.html) does ALL of
-// that — picking local files, or downloading a folder's .xlsx files straight
-// out of Google Drive — and stores what it picked in a small shared
-// IndexedDB database ("JazzDashShared") under this dashboard's id. Both
-// pages are on the same site (the JazzDash GitHub Pages repo), so they
-// share that storage.
+// its own Google sign-in. The Jazz Dash home page (index.html) does the
+// picking — local files, or which folder of Google Drive files to open —
+// and stores what it picked in a small shared IndexedDB database
+// ("JazzDashShared") under this dashboard's id. Both pages are on the same
+// site (the JazzDash GitHub Pages repo), so they share that storage.
 //
 // The record stays in place after it's read, so reloading this page reopens
 // the same files. Opening something new from the home page replaces it.
 //
-// Three kinds of record, depending on where the files came from:
+// Four kinds of record, depending on where the files came from:
 //   "folder"  — a local folder handle (+ optional list of which files in it
 //               are this dashboard's, when the folder was mixed)
 //   "handles" — individual local file handles (Open file locally)
-//   "blobs"   — plain File copies — used for files downloaded from Google
-//               Drive, and for browsers without folder/file access
+//   "blobs"   — plain File copies, for browsers without folder/file access
 //               (Firefox/Safari): readable, but saves download a copy
-//               rather than writing back in place (Drive files are also
-//               read-only here — round-tripping edits back up to Drive
-//               isn't wired up yet).
+//   "drive"   — files picked from the person's Google Drive on Jazz Dash
+//               home. Only {id, name, modifiedTime} references are stored
+//               here, never file bytes — this dashboard downloads (and
+//               caches, and later re-uploads) the real content itself, via
+//               createDriveFileHandle() further down. True two-way save:
+//               edits go straight back to the real file in Drive.
 //
 // The browser may ask again before letting the page open local files (e.g.
 // after the browser was restarted) — that needs a click, so the
@@ -2406,6 +2407,187 @@ function createInMemoryFileHandle(name, fileObj) {
     async queryPermission() { return "denied"; },
     async requestPermission() { return "denied"; },
     async createWritable() { throw new Error("This file was opened without disk access, so it can't be saved back in place."); },
+  };
+}
+
+// =============================================================================
+// GOOGLE DRIVE ROUND-TRIPPING — lazy, cached, read/write handles
+// =============================================================================
+// When Jazz Dash home hands this dashboard files that live in Google Drive,
+// it does NOT download their contents — it only passes along lightweight
+// references ({id, name, modifiedTime}). This dashboard is responsible for
+// actually reading and writing those files' bytes, through
+// createDriveFileHandle() below. That function builds an object that looks
+// exactly like a real FileSystemFileHandle (same getFile / queryPermission /
+// requestPermission / createWritable shape as a local file), so every other
+// part of this app — useFileHandle()/saveWorkbook() included — can use a
+// Drive file without any special-casing. Saving already does the right
+// sequence of calls (check permission, create a writable, write, close,
+// with a download-a-copy fallback on any error) for ANY handle shape, so
+// nothing about saving had to change — only this new handle type.
+//
+// Reading is cached, so re-opening a file you already have doesn't
+// re-download it every time: every downloaded file is stored in its own
+// IndexedDB database (JazzDashDriveCache, kept separate from JazzDashShared
+// on purpose, to avoid any version conflict between the two) keyed by Drive
+// file id, alongside the file's modifiedTime at the moment it was
+// downloaded. getFile() always asks Drive for the file's CURRENT
+// modifiedTime first (a cheap metadata-only request) and compares it to
+// what's cached: if they match, nothing has changed since the last
+// download, so the cached bytes are reused; if they differ (the file was
+// edited in Drive directly, by this dashboard or anyone else), it downloads
+// fresh bytes and refreshes the cache.
+//
+// Writing saves straight back to the real Google Drive file, in place —
+// never a new file: createWritable().write() sends the new bytes to that
+// same Drive file id, then immediately updates the cache with the new bytes
+// and the new modifiedTime Drive hands back, so a save is never followed by
+// a wasted re-download of the file that was just written.
+
+const JAZZ_CACHE_DB = "JazzDashDriveCache";
+const JAZZ_CACHE_STORE = "files";
+
+// Opens (and, on first use, creates) the shared Drive-file cache database.
+function driveCacheOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(JAZZ_CACHE_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(JAZZ_CACHE_STORE)) req.result.createObjectStore(JAZZ_CACHE_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+// Looks up one cached Drive file by its Drive file id. Resolves to
+// {modifiedTime, name, blob}, or undefined if nothing is cached yet.
+async function driveCacheGet(fileId) {
+  const db = await driveCacheOpen();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(JAZZ_CACHE_STORE, "readonly").objectStore(JAZZ_CACHE_STORE).get(fileId);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+// Saves (or overwrites) the cached copy of one Drive file.
+async function driveCacheSet(fileId, entry) {
+  const db = await driveCacheOpen();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(JAZZ_CACHE_STORE, "readwrite").objectStore(JAZZ_CACHE_STORE).put(entry, fileId);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Reads the Google access token Jazz Dash home already cached in
+// sessionStorage when the person signed in there. sessionStorage survives
+// navigating from index.html to this dashboard (same browser tab, same
+// site), so no extra sign-in step is needed here — this is the only place
+// this dashboard touches Google auth. Returns null if there's no token, or
+// if it's expired, so callers can show a clear "go sign in again" message.
+function jazzDriveToken() {
+  try {
+    const raw = sessionStorage.getItem("jazzdash_google_token");
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached.token || !cached.expiresAt || Date.now() >= cached.expiresAt) return null;
+    return cached.token;
+  } catch (e) { return null; }
+}
+
+// Thin wrapper around fetch() used for every Google Drive API call this
+// dashboard makes: attaches the shared sign-in token as a Bearer header,
+// and throws a clear, user-facing error if the token is missing/expired or
+// Drive rejects the request, instead of letting callers deal with a raw
+// network failure.
+async function driveApiFetch(url, opts) {
+  const token = jazzDriveToken();
+  if (!token) throw new Error("Not signed in to Google Drive — go back to Jazz Dash home and sign in again.");
+  const res = await fetch(url, {
+    ...opts,
+    headers: { ...(opts && opts.headers), Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error("Your Google sign-in expired — go back to Jazz Dash home and sign in again.");
+  if (!res.ok) throw new Error(`Google Drive request failed (${res.status})`);
+  return res;
+}
+
+// Builds a FileSystemFileHandle-shaped object backed by one real Google
+// Drive file, so the rest of this app can read and write it exactly like a
+// local file it was handed directly. `modifiedTime` is just the value Jazz
+// Dash home saw when it listed the folder, used only as a starting point —
+// getFile() always re-checks Drive's current modifiedTime itself before
+// trusting the cache.
+function createDriveFileHandle(fileId, name, modifiedTime) {
+  return {
+    kind: "file",
+    name,
+
+    // Returns a real File object holding this Drive file's current bytes.
+    // Always checks freshness first (a small metadata-only request for
+    // just the modifiedTime field) before deciding whether the cached copy
+    // is still good or a real download is needed.
+    async getFile() {
+      const metaRes = await driveApiFetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`
+      );
+      const meta = await metaRes.json();
+      const currentModifiedTime = meta.modifiedTime;
+
+      const cached = await driveCacheGet(fileId).catch(() => undefined);
+      if (cached && cached.modifiedTime === currentModifiedTime) {
+        return new File([cached.blob], name, { type: cached.blob.type });
+      }
+
+      const fileRes = await driveApiFetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`
+      );
+      const blob = await fileRes.blob();
+      await driveCacheSet(fileId, { modifiedTime: currentModifiedTime, name, blob }).catch(() => {});
+      return new File([blob], name, { type: blob.type });
+    },
+
+    // "Permission" for a Drive file isn't a one-time browser prompt the way
+    // it is for a local file — it's simply whether the signed-in Google
+    // account is currently allowed to edit this specific file, which Drive
+    // reports directly via the file's "capabilities". Both methods run the
+    // same check; Drive has no separate "ask the user" step to distinguish
+    // them the way local file handles do.
+    async queryPermission(opts) {
+      try {
+        const res = await driveApiFetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=capabilities`
+        );
+        const data = await res.json();
+        return data.capabilities && data.capabilities.canEdit ? "granted" : "denied";
+      } catch (e) { return "denied"; }
+    },
+    async requestPermission(opts) { return this.queryPermission(opts); },
+
+    // Returns a tiny "writable" with just the one method this app actually
+    // uses (write). Saves the new bytes straight back to the real Drive
+    // file, overwriting it IN PLACE (same fileId — this never creates a
+    // new file). After a successful save, the cache is updated immediately
+    // with the new bytes and the new modifiedTime Drive hands back, so a
+    // reload right after saving doesn't trigger a pointless re-download of
+    // the file that was just written.
+    async createWritable() {
+      return {
+        async write(data) {
+          const res = await driveApiFetch(
+            `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=modifiedTime`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+              body: data,
+            }
+          );
+          const result = await res.json();
+          const blob = data instanceof Blob ? data : new Blob([data]);
+          await driveCacheSet(fileId, { modifiedTime: result.modifiedTime, name, blob }).catch(() => {});
+        },
+        async close() {},
+      };
+    },
   };
 }
 
@@ -2458,6 +2640,12 @@ async function jazzResolveFiles(rec, ask) {
     }
   } else if (rec.kind === "blobs") {
     (rec.files || []).forEach((f) => files.push({ name: f.name, handle: createInMemoryFileHandle(f.name, f) }));
+  } else if (rec.kind === "drive") {
+    // Files living in Google Drive: build one live Drive-backed handle per
+    // reference. No upfront permission prompt the way local files need —
+    // createDriveFileHandle's queryPermission/requestPermission check
+    // Drive's own edit permission on demand instead, inside the save path.
+    (rec.fileRefs || []).forEach((f) => files.push({ name: f.name, handle: createDriveFileHandle(f.id, f.name, f.modifiedTime) }));
   }
   files.sort((a, b) => a.name.localeCompare(b.name));
   return { files, pending };
