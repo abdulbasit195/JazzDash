@@ -618,12 +618,17 @@ function initGoogle() {
   }
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
-    // drive.readonly (not just drive.metadata.readonly): this page both
-    // checks folder VISIBILITY by name, and — once a dashboard is picked —
-    // downloads that folder's .xlsx files so the dashboard has something to
-    // open. Still read-only: nothing here can create, edit or delete
-    // anything in Drive.
-    scope: "https://www.googleapis.com/auth/drive.readonly " +
+    // Full "drive" scope (not drive.readonly, and not the narrower
+    // drive.file, which only sees files THIS app created): this page checks
+    // folder VISIBILITY by name and lists each folder's .xlsx files, but the
+    // actual reading AND WRITING of file content now happens entirely on
+    // the dashboard side (see each dashboard's createDriveFileHandle). The
+    // dashboard needs to be able to save edits straight back to the real
+    // Drive file, which requires full read/write access, not just
+    // read-only — this is the one real permissions change in the
+    // round-tripping design: every signed-in user will be asked to grant
+    // read/write Drive access instead of read-only.
+    scope: "https://www.googleapis.com/auth/drive " +
            "https://www.googleapis.com/auth/userinfo.email " +
            "https://www.googleapis.com/auth/userinfo.profile",
     callback: async (resp) => {
@@ -737,10 +742,14 @@ async function findDriveFolder(folderName) {
 }
 
 // ------------------------------------------------------- drive hand-off --
-// Downloads every .xlsx file directly inside a Drive folder and hands them
-// to the dashboard exactly like a local "blobs" pick (see handOff() above)
-// — the dashboard's existing JAZZ DASH HANDOFF receiver reads this kind of
-// record already, so no dashboard-side change was needed for this to work.
+// IMPORTANT — this page does NOT download any Drive file's actual content.
+// It only lists each folder's .xlsx files' lightweight metadata (id, name,
+// modifiedTime) and hands those REFERENCES to the dashboard. The dashboard
+// itself downloads bytes lazily — only when a file is actually opened — and
+// caches/round-trips them from there (see each dashboard's
+// createDriveFileHandle / driveApiFetch / JazzDashDriveCache code). This
+// keeps this page fast no matter how big the files are, and means a save
+// made in the dashboard writes straight back to the real file in Drive.
 async function listDriveExcelFiles(folderId) {
   const q = `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=${MAX_DRIVE_FILES}&fields=files(id,name,modifiedTime)`;
@@ -750,65 +759,10 @@ async function listDriveExcelFiles(folderId) {
   return (data.files || []).filter((f) => isExcel(f.name));
 }
 
-// ---- Drive download cache -------------------------------------------------
-// A separate IndexedDB database (not JazzDashShared — that one's version is
-// depended on by every dashboard's own hand-off code, so it's left alone)
-// keyed by Drive file id, storing the file's bytes alongside the
-// `modifiedTime` Drive reported when they were fetched. Before downloading,
-// each file's CURRENT `modifiedTime` (from listDriveExcelFiles, a cheap
-// metadata-only call) is compared to the cached one — a match means the
-// file hasn't changed on Drive since last time, so the cached bytes are
-// reused instead of downloading the whole file again. Cache entries have no
-// expiry; a changed file simply gets a different modifiedTime and is
-// re-downloaded and re-cached automatically.
-const JAZZ_CACHE_DB = "JazzDashDriveCache";
-const JAZZ_CACHE_STORE = "files";
-function driveCacheOpen() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(JAZZ_CACHE_DB, 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(JAZZ_CACHE_STORE)) req.result.createObjectStore(JAZZ_CACHE_STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function driveCacheGet(fileId) {
-  try {
-    const db = await driveCacheOpen();
-    return await new Promise((resolve, reject) => {
-      const req = db.transaction(JAZZ_CACHE_STORE, "readonly").objectStore(JAZZ_CACHE_STORE).get(fileId);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) { return null; } // caching is a pure optimization — never let it block a download
-}
-async function driveCacheSet(fileId, entry) {
-  try {
-    const db = await driveCacheOpen();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(JAZZ_CACHE_STORE, "readwrite");
-      tx.objectStore(JAZZ_CACHE_STORE).put(entry, fileId);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) { /* non-fatal — just means no cache hit next time */ }
-}
-
-// Returns { file: File, fromCache: boolean }.
-async function downloadDriveFile(file) {
-  const cached = await driveCacheGet(file.id);
-  if (cached && cached.modifiedTime === file.modifiedTime) {
-    return { file: new File([cached.blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fromCache: true };
-  }
-  const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!resp.ok) throw new Error(`Couldn't download "${file.name}" (${resp.status})`);
-  const blob = await resp.blob();
-  await driveCacheSet(file.id, { modifiedTime: file.modifiedTime, name: file.name, blob });
-  return { file: new File([blob], file.name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fromCache: false };
-}
-
+// Looks up a Drive folder's .xlsx files (metadata only — see the note
+// above) and hands those references to the chosen dashboard as a "drive"
+// kind record in JazzDashShared, then navigates to it. The dashboard reads
+// this record on load and does all the actual file reading/writing itself.
 async function openDashboardFromDrive(dash, folderId) {
   if (!folderId) { setStatus("Couldn't find that Drive folder.", true); return; }
   setStatus(`Reading "${dash.driveFolderName}" from Drive…`);
@@ -823,33 +777,11 @@ async function openDashboardFromDrive(dash, folderId) {
     setStatus(`No .xlsx files found in the "${dash.driveFolderName}" Drive folder.`, true);
     return;
   }
-  let done = 0, cachedCount = 0;
-  setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (0/${driveFiles.length})`);
-  // All files download in parallel (one request each, all in flight at once)
-  // instead of one-at-a-time — with only a handful of files per folder this
-  // turns N sequential round-trips into roughly one. Files that haven't
-  // changed since last time skip the download entirely (see the cache
-  // above), so a repeat open of the same folder can be near-instant.
-  const results = (await Promise.all(driveFiles.map(async (f) => {
-    try {
-      const result = await downloadDriveFile(f);
-      done++;
-      if (result.fromCache) cachedCount++;
-      setStatus(`Downloading ${driveFiles.length} file(s) from Drive… (${done}/${driveFiles.length}${cachedCount ? `, ${cachedCount} from cache` : ""})`);
-      return result;
-    } catch (err) {
-      console.warn(err.message);
-      done++;
-      return null;
-    }
-  }))).filter(Boolean);
-  const files = results.map((r) => r.file);
-  if (!files.length) {
-    setStatus("Couldn't download the files from Drive — try again.", true);
-    return;
-  }
+  // Keep only the lightweight reference fields the dashboard needs — never
+  // the file content, which this page never downloads in the first place.
+  const fileRefs = driveFiles.map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime }));
   try {
-    await jazzPutSession(dash.id, { kind: "blobs", label: dash.driveFolderName, files, savedAt: Date.now() });
+    await jazzPutSession(dash.id, { kind: "drive", label: dash.driveFolderName, fileRefs, savedAt: Date.now() });
   } catch (err) {
     setStatus("Couldn't hand the files over to the dashboard: " + err.message, true);
     return;
