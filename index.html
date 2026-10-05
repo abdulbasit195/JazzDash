@@ -348,6 +348,24 @@ const DASHBOARDS = [
       sheets: [],
     },
   },
+  {
+    // Risk Management Dash reads several DIFFERENT file shapes (Issues,
+    // KRIs, Risk Register, Incidents, ...) out of one Drive folder — only
+    // "Issues" files are taught to it so far (see detectIssuesLayout() in
+    // its own app.js). Add that new kind's distinctive headers below, at
+    // the same time it's added to that dashboard's own detector list, so
+    // this home page keeps recognising every file kind that dashboard can
+    // actually read.
+    id: "risk-management", label: "Risk Management Dash", url: "risk_management_dashboard.html", driveFolderName: "Risk Management",
+    detect: {
+      headers: {
+        // Issues files:
+        "issue title": 4, "issue description": 2, "discovery date": 2,
+        "target completion date": 3, "issue owners": 2,
+      },
+      sheets: [],
+    },
+  },
 ];
 const MIN_DETECT_SCORE = 3;
 
