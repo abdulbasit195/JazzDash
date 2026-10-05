@@ -476,8 +476,10 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
     <div class="filters" id="circularFilters" style="display:none;">
       <div class="filter-label">FILTER BY MANAGEMENT COMMENTS</div>
       <div class="chip-row" id="circMgmtChips"></div>
-      <div class="filter-label">FILTER BY COMPLIANCE</div>
+      <div class="filter-label">FILTER BY BRANCHLESS COMPLIANCE</div>
       <div class="chip-row" id="circCompliantChips"></div>
+      <div class="filter-label">FILTER BY ACTION NEEDED</div>
+      <div class="chip-row" id="circNeedsActionChips"></div>
     </div>
     <div id="circularGroups"></div>
   </div>
@@ -1248,7 +1250,7 @@ async function loadSessionsFromHandles(fileHandles) {
 function freshFilterState() {
   return {
     tab: null, department: null, status: null, iav: null, subteam: null, source: null, query: "",
-    circMgmt: null, circCompliant: null, // circular files' own two filters — see renderCircularGroups()
+    circMgmt: null, circCompliant: null, circNeedsAction: null, // circular files' own filters — see renderCircularGroups()
     openTabs: new Set(), openBriefs: new Set(),
   };
 }
@@ -1466,6 +1468,27 @@ function getCircularBriefsForSession(session) {
       // compliant one.
       const allCompliant = presentStatusValues.length > 0 && presentStatusValues.every((v) => COMPLIANT_STATUS_RE.test(v));
 
+      // "Compliant by Branchless" — looks at whichever department group's
+      // name contains "DFS" (matches both "DFS" and "Branchless - DFS",
+      // the user's own department, however a given file labels it, while
+      // staying clear of an unrelated "Branchless Ops" group some files
+      // also have). Every value that group has filled in (status OR
+      // comment — some files only carry the compliance signal as a
+      // comment, e.g. "Compliant - ...") must read as compliant, and there
+      // must be at least one value, same "missing isn't compliant" rule as
+      // allCompliant above.
+      const branchlessGroups = [...groupsMap.values()].filter((g) => g.department.toLowerCase().includes("dfs"));
+      const branchlessValues = branchlessGroups.flatMap((g) => [...g.statusFields, ...g.commentFields].map((f) => f.value));
+      const compliantByBranchless = branchlessValues.length > 0 && branchlessValues.every((v) => COMPLIANT_STATUS_RE.test(v));
+
+      // "Needs Action" — the compliance-team department (name containing
+      // "complian", e.g. "Compliance Team") left an actual remark (a
+      // comment-kind field, not just a status rating) on this row — the
+      // "please provide evidence" case, worth flagging even on a row
+      // Branchless already marked compliant.
+      const complianceGroups = [...groupsMap.values()].filter((g) => g.department.toLowerCase().includes("complian"));
+      const needsAction = complianceGroups.some((g) => g.commentFields.length > 0);
+
       const { preview } = truncateByLength(requirementFull);
       const id = `${session.fileName}::${sheetName}::${r}`;
       briefs.push({
@@ -1482,6 +1505,8 @@ function getCircularBriefsForSession(session) {
         managementComments,
         hasManagementComments: !!managementComments,
         allCompliant,
+        compliantByBranchless,
+        needsAction,
       });
     }
   });
@@ -1842,9 +1867,10 @@ function renderCurrentView() {
   if (circularFiltersEl) circularFiltersEl.style.display = circularBriefs.length > 0 ? "" : "none";
   renderCircMgmtChips(circularBriefs, st);
   renderCircCompliantChips(circularBriefs, st);
+  renderCircNeedsActionChips(circularBriefs, st);
   renderCircularGroups(circularBriefs, st);
 
-  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circMgmt || st.circCompliant;
+  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circMgmt || st.circCompliant || st.circNeedsAction;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
   document.getElementById("searchBox").value = st.query;
 }
@@ -2174,25 +2200,33 @@ function matchesCircularFilters(b, st) {
   if (!matchesCircularQuery(b, st)) return false;
   if (st.circMgmt === "yes" && !b.hasManagementComments) return false;
   if (st.circMgmt === "no" && b.hasManagementComments) return false;
-  if (st.circCompliant === "yes" && !b.allCompliant) return false;
-  if (st.circCompliant === "no" && b.allCompliant) return false;
+  if (st.circCompliant === "yes" && !b.compliantByBranchless) return false;
+  if (st.circCompliant === "no" && b.compliantByBranchless) return false;
+  if (st.circNeedsAction === "yes" && !b.needsAction) return false;
+  if (st.circNeedsAction === "no" && b.needsAction) return false;
   return true;
 }
 
 // Stat row for circular files: Total Requirement Details, Has Management
-// Comments, All Compliant — replaces the standard brief-count stats, which
-// are always 0 for a circular-only file since it has no "Brief" column.
+// Comments, Compliant by Branchless, Needs Action — replaces the standard
+// brief-count stats, which are always 0 for a circular-only file since it
+// has no "Brief" column. "Compliant by Branchless" and "Needs Action" are
+// deliberately separate counts, not opposites of each other: a row can be
+// marked compliant by Branchless/DFS AND still have a compliance-team
+// comment asking for evidence, which is exactly the case worth flagging.
 function renderCircularStats(circularBriefs) {
   const row = document.getElementById("circularStatRow");
   if (!row) return;
   if (circularBriefs.length === 0) { row.style.display = "none"; row.innerHTML = ""; return; }
   const total = circularBriefs.length;
   const withMgmt = circularBriefs.filter((b) => b.hasManagementComments).length;
-  const compliant = circularBriefs.filter((b) => b.allCompliant).length;
+  const compliantByBranchless = circularBriefs.filter((b) => b.compliantByBranchless).length;
+  const needsAction = circularBriefs.filter((b) => b.needsAction).length;
   const items = [
     { n: total, l: "Total Requirement Details" },
     { n: withMgmt, l: "Has Management Comments", cls: "accent-iav" },
-    { n: compliant, l: "All Compliant", cls: "accent-closed" },
+    { n: compliantByBranchless, l: "Compliant by Branchless", cls: "accent-closed" },
+    { n: needsAction, l: "Needs Action", cls: "accent-open" },
   ];
   row.style.display = "";
   row.innerHTML = items.map(
@@ -2221,16 +2255,34 @@ function renderCircMgmtChips(circularBriefs, st) {
 function renderCircCompliantChips(circularBriefs, st) {
   const el = document.getElementById("circCompliantChips");
   if (!el) return;
-  const yesCount = circularBriefs.filter((b) => b.allCompliant).length;
+  const yesCount = circularBriefs.filter((b) => b.compliantByBranchless).length;
   const noCount = circularBriefs.length - yesCount;
   el.innerHTML = `
-    <button type="button" class="chip ${st.circCompliant === "yes" ? "active" : ""}" data-circcompliant="yes">All Compliant <span class="count">${yesCount}</span></button>
-    <button type="button" class="chip ${st.circCompliant === "no" ? "active" : ""}" data-circcompliant="no">Not Fully Compliant <span class="count">${noCount}</span></button>
+    <button type="button" class="chip ${st.circCompliant === "yes" ? "active" : ""}" data-circcompliant="yes">Compliant by Branchless <span class="count">${yesCount}</span></button>
+    <button type="button" class="chip ${st.circCompliant === "no" ? "active" : ""}" data-circcompliant="no">Not Compliant by Branchless <span class="count">${noCount}</span></button>
   `;
   el.querySelectorAll("[data-circcompliant]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const v = btn.getAttribute("data-circcompliant");
       st.circCompliant = st.circCompliant === v ? null : v;
+      renderCurrentView();
+    });
+  });
+}
+
+function renderCircNeedsActionChips(circularBriefs, st) {
+  const el = document.getElementById("circNeedsActionChips");
+  if (!el) return;
+  const yesCount = circularBriefs.filter((b) => b.needsAction).length;
+  const noCount = circularBriefs.length - yesCount;
+  el.innerHTML = `
+    <button type="button" class="chip ${st.circNeedsAction === "yes" ? "active" : ""}" data-circneedsaction="yes">Needs Action <span class="count">${yesCount}</span></button>
+    <button type="button" class="chip ${st.circNeedsAction === "no" ? "active" : ""}" data-circneedsaction="no">No Action Needed <span class="count">${noCount}</span></button>
+  `;
+  el.querySelectorAll("[data-circneedsaction]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.getAttribute("data-circneedsaction");
+      st.circNeedsAction = st.circNeedsAction === v ? null : v;
       renderCurrentView();
     });
   });
@@ -2366,7 +2418,7 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 document.getElementById("clearFiltersBtn").addEventListener("click", () => {
   const st = activeState();
   st.tab = null; st.department = null; st.status = null; st.iav = null; st.subteam = null; st.source = null; st.query = "";
-  st.circMgmt = null; st.circCompliant = null;
+  st.circMgmt = null; st.circCompliant = null; st.circNeedsAction = null;
   renderCurrentView();
 });
 document.getElementById("toggleAllBtn").addEventListener("click", (e) => {
