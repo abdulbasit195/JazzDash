@@ -463,6 +463,12 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
     </div>
 
     <div id="groups"></div>
+
+    <!-- "Circular" files (a different column layout — see detectCircularLayout()
+         in app.js) render into this separate container, right below the
+         standard SO/SSO/Annexure-style ones above. Left empty (no heading
+         shown) when the currently open file(s) have no circular-format tabs. -->
+    <div id="circularGroups"></div>
   </div>
 
   <!-- ============================== ADD/EDIT MODAL ==============================
@@ -535,6 +541,65 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="newCommentSaveBtn">Add updated comment</button>
           <button type="button" class="btn btn-ghost" id="newCommentCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== CIRCULAR FILE — EDIT MODAL =====================
+       One Edit modal for every circular-tab row ("Requirement Detail" rows
+       — see detectCircularLayout() in app.js). Requirement Detail, Relevant
+       Department(s) and Management Comments are fixed fields; #circ_fields
+       is filled in dynamically by openCircularModal() with one input per
+       per-department/standalone column that specific tab actually has, so
+       this same markup works for every circular file regardless of exactly
+       which department/status/comment columns it uses. -->
+  <div class="modal-backdrop" id="circularModalBackdrop" style="display:none;">
+    <div class="modal-card">
+      <h2>Edit requirement</h2>
+      <form id="circularBriefForm">
+        <div class="field">
+          <label for="circ_requirement">Requirement Detail</label>
+          <textarea id="circ_requirement" required></textarea>
+        </div>
+        <div class="field">
+          <label for="circ_department">Relevant Department(s) — one per line (or separate with "/")</label>
+          <textarea id="circ_department" placeholder="e.g. Branchless Operations/DFS"></textarea>
+        </div>
+        <div id="circ_fields"></div>
+        <div class="field">
+          <label for="circ_management">Management Comments — replaces the entire cell with this exact text</label>
+          <textarea id="circ_management"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save changes</button>
+          <button type="button" class="btn btn-ghost" id="circularModalCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== "ADD MANAGEMENT COMMENT" MODAL =====================
+       Distinct from the circular Edit modal's own Management Comments box
+       above: submitting this APPENDS a new, dated entry to that same cell
+       (creating the "Management Comments" column — always at the rightmost
+       position — the first time it's needed for a tab) instead of replacing
+       whatever's already there. See ensureManagementCommentColumn() in app.js. -->
+  <div class="modal-backdrop" id="managementCommentBackdrop" style="display:none;">
+    <div class="modal-card">
+      <h2>Add Management Comment</h2>
+      <p style="font-size:12.5px; color:var(--text-lo); margin:-8px 0 16px;">
+        Adds a new, dated entry to this requirement's Management Comments
+        column, underneath whatever's already there.
+      </p>
+      <form id="managementCommentForm">
+        <div class="field">
+          <label for="mc_comment">Management comment</label>
+          <textarea id="mc_comment" required></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Add comment</button>
+          <button type="button" class="btn btn-ghost" id="managementCommentCancelBtn">Cancel</button>
         </div>
       </form>
     </div>
@@ -641,6 +706,144 @@ function detectComplianceColumns(headerRow) {
   };
 }
 
+// =============================================================================
+// CIRCULAR FILES — a second, independent column-detection scheme
+// =============================================================================
+// Some files ("circulars") use a completely different layout from the
+// SO/SSO/Annexure-style reports detectComplianceColumns() above handles —
+// there's no single "Brief"/"Department"/"Status"/"Comment" column; instead
+// each row is one regulatory "Requirement Detail", and the file names a
+// DIFFERENT status and/or comment column PER DEPARTMENT (e.g. "Branchless -
+// DFS", "JC ISRM - Status", "Compliance Team Comments" might all live in the
+// same row). A tab is treated as a circular file only when it has NO
+// recognizable "Brief" column but DOES have a "Requirement Detail" column
+// (see the fallback in loadSessionsFromHandles below) — so this never
+// changes how any existing SO/SSO/Annexure-style file is read.
+//
+// classifyCircularColumns() is the heart of it: for every column that isn't
+// one of the fixed structural ones (Date of Issuance, Circular, Sub Clause,
+// Requirement Detail, Relevant Department, and the reserved "Management
+// Comments" column), it works out two things straight from that column's
+// OWN header text, left to right:
+//   1. kind  — "status" (a short category value, e.g. "Complied") or
+//              "comment" (freeform text) — decided by whether the header
+//              contains the word "comment"/"remark".
+//   2. department — whichever department that column belongs to, found by
+//              stripping the recognized keyword (Status/Review/Reviewed/
+//              Comments/Remarks, or a "Management Comments - " prefix) out
+//              of the header and keeping what's left, e.g. "JC ISRM -
+//              Status" -> department "JC ISRM". If NOTHING is left after
+//              stripping — the header literally just says "Status" or
+//              "Review" with no department named — this column is treated
+//              as belonging to the MOST RECENT column (scanning leftward)
+//              that WAS matched to a department, exactly as asked: a bare
+//              "Status"/"Review" column always describes whatever
+//              department the column just before it was about.
+// A header with none of those keywords at all falls back to: short header
+// (<=4 words) -> treated as the department name itself, with a "status"
+// value (covers headers like "Branchless - DFS" that are just a channel
+// name with a short status value and no keyword); longer header -> a
+// standalone freeform field, not tied to any department (covers one-off
+// columns like "Teams name still pending points").
+// =============================================================================
+
+const CIRCULAR_FILLER_DEPARTMENT_WORDS = new Set([
+  "updated", "revised", "new", "latest", "current", "final", "overall",
+]);
+
+// Pulls the department name and value "kind" (status vs comment) out of
+// ONE column header, given `lastDept` — the department the previous
+// (non-bare) column in this same scan was matched to, used only when this
+// header turns out to be a bare "Status"/"Review" with no department of
+// its own to report.
+function classifyCircularHeader(rawHeader, lastDept) {
+  const header = trimmed(rawHeader);
+  let department = null;
+  let kind;
+  let isBare = false;
+
+  const mgmtPrefixMatch = header.match(/^management\s+comments?\s*[-:]\s*(.+)$/i);
+  const hasCommentWord = /\b(comments?|remarks?)\b/i.test(header);
+  const hasStatusWord = /\b(status|reviewed|review)\b/i.test(header);
+
+  if (/^updated comments? dated\b/i.test(header)) {
+    // The exact dated-column convention "Add Updated Comment" itself
+    // creates (see ensureUpdatedCommentColumn) — never a department name,
+    // always its own standalone field, however many of these pile up.
+    kind = "comment";
+    department = "";
+  } else if (mgmtPrefixMatch) {
+    // "Management Comments - DFS" style header: everything after the dash
+    // names the department this particular management-comment column is for.
+    kind = "comment";
+    department = mgmtPrefixMatch[1].trim();
+  } else if (hasCommentWord) {
+    kind = "comment";
+    department = header.replace(/\b(comments?|remarks?)\b/ig, "").replace(/^[\s\-:|]+|[\s\-:|]+$/g, "").trim();
+  } else if (hasStatusWord) {
+    kind = "status";
+    department = header.replace(/\b(status|reviewed|review)\b/ig, "").replace(/^[\s\-:|]+|[\s\-:|]+$/g, "").trim();
+  } else {
+    // No recognized keyword at all. A short header is almost certainly just
+    // a department/channel name with an implied status value (e.g.
+    // "Branchless - DFS"); a long one reads like a one-off freeform note
+    // column, so it's kept standalone instead of inventing a fake
+    // department out of its whole sentence-like header.
+    const wordCount = header.split(/\s+/).filter(Boolean).length;
+    if (wordCount > 0 && wordCount <= 4) { kind = "status"; department = header; }
+    else { kind = "comment"; department = ""; }
+  }
+
+  if (!department) {
+    // Bare "Status"/"Review" (or a long unmatched header) — attach to
+    // whichever department the nearest column to the left named.
+    isBare = true;
+    department = lastDept || "";
+  }
+
+  if (department && CIRCULAR_FILLER_DEPARTMENT_WORDS.has(department.toLowerCase())) {
+    department = ""; // e.g. "updated status" -> stripping "status" leaves
+                      // just "updated", which isn't a real department name
+  }
+
+  return { header, kind, department: department || null, isBare };
+}
+
+// Builds the full column map for one circular-format tab, or returns null
+// if this header row doesn't look like a circular file at all (no
+// "Requirement Detail" column — the signal loadSessionsFromHandles uses to
+// decide whether to try this detection scheme in the first place).
+function detectCircularLayout(headerRow) {
+  const requirement = findFirstMatchingColumn(headerRow, (h) => h.includes("requirement detail"));
+  if (requirement < 0) return null;
+
+  const department = findFirstMatchingColumn(headerRow, (h) => h.includes("relevant department") || h.includes("relevant deparment"));
+  const dateOfIssuance = findFirstMatchingColumn(headerRow, (h) => h.includes("date of issuance"));
+  const circularName = findFirstMatchingColumn(headerRow, (h) => h === "circular" || h.includes("circular name"));
+  const subClause = findFirstMatchingColumn(headerRow, (h) => h.includes("sub clause"));
+  // The ONE reserved, file-wide column "Add Management Comment" always
+  // targets — reused if the file already has it (several of these files
+  // do), created fresh at the rightmost column the first time it's needed
+  // otherwise. Deliberately NOT part of the per-department `fields` below.
+  const managementComments = findLastMatchingColumn(headerRow, (h) => h === "management comments" || h === "management comment");
+
+  const reserved = new Set([requirement, department, dateOfIssuance, circularName, subClause, managementComments].filter((i) => i >= 0));
+
+  const fields = [];
+  let lastDeptField = null;
+  headerRow.forEach((rawHeader, idx) => {
+    if (reserved.has(idx)) return;
+    const header = trimmed(rawHeader);
+    if (!header) return; // unnamed/blank trailing columns carry nothing to show
+    const { kind, department: dept, isBare } = classifyCircularHeader(header, lastDeptField ? lastDeptField.department : null);
+    const field = { colIdx: idx, header, kind, department: dept, isBare };
+    fields.push(field);
+    if (!isBare && field.department) lastDeptField = field;
+  });
+
+  return { requirement, department, dateOfIssuance, circularName, subClause, managementComments, fields };
+}
+
 // -------------------------------------------------------- text processing --
 
 function truncateBrief(text, maxSentences, hardCap) {
@@ -659,12 +862,17 @@ function truncateBrief(text, maxSentences, hardCap) {
 }
 
 function parseDepartments(raw) {
-  const text = trimmed(raw);
+  const text = trimmed(raw)
+    // Remove stray "N/A" notes (sometimes left in this column as e.g.
+    // "6) N/A") BEFORE splitting on "/" below — otherwise "N/A" itself gets
+    // cut into two bogus one-letter "departments", "N" and "A".
+    .replace(/\bn\/a\b/ig, "");
   if (!text) return [];
   const pieces = text
-    .split(/[\/\n]/)
-    .map((s) => s.trim().replace(/^[A-Za-z]\)\s*/, "").replace(/^[A-Za-z]:\s*/, "").trim())
-    .filter(Boolean);
+    .split(/[\/\n,]/)
+    .map((s) => s.trim().replace(/^[A-Za-z0-9]\)\s*/, "").replace(/^[A-Za-z]:\s*/, "").trim())
+    .filter(Boolean)
+    .filter((s) => s.length > 1); // drop any other single-letter fragments left over from splitting
   const seen = new Set();
   const out = [];
   pieces.forEach((p) => {
@@ -947,14 +1155,24 @@ async function loadSessionsFromHandles(fileHandles) {
         const rows = worksheetToRows(ws);
         if (!rows.length) return;
         const cols = detectComplianceColumns(rows[0]);
-        if (cols.brief < 0) return; // no recognizable brief column — e.g. the pivot/summary "Sheet1"
-        // Tracks (normalized) headers of "Updated Comments dated ..." columns
-        // added BY THIS TOOL in this session — see commentDeletable below for
-        // why this can't just be "any header matching that pattern": real
-        // source reports already use this exact naming convention for their
-        // own genuine review-cycle columns, so pattern-matching alone would
-        // happily offer to delete real audit history, not just our own adds.
-        tabs[sheetName] = { rows, cols, toolAddedCommentHeaders: new Set() };
+        if (cols.brief >= 0) {
+          // Standard SO/SSO/Annexure-style tab.
+          // Tracks (normalized) headers of "Updated Comments dated ..." columns
+          // added BY THIS TOOL in this session — see commentDeletable below for
+          // why this can't just be "any header matching that pattern": real
+          // source reports already use this exact naming convention for their
+          // own genuine review-cycle columns, so pattern-matching alone would
+          // happily offer to delete real audit history, not just our own adds.
+          tabs[sheetName] = { rows, cols, isCircular: false, toolAddedCommentHeaders: new Set() };
+          worksheets[sheetName] = ws;
+          return;
+        }
+        // Not a standard tab — try the "circular" layout (keyed off a
+        // "Requirement Detail" column instead of "Brief") before giving up
+        // on this tab entirely. See detectCircularLayout() above.
+        const circularLayout = detectCircularLayout(rows[0]);
+        if (!circularLayout) return; // neither shape matched — e.g. the pivot/summary "Sheet2"
+        tabs[sheetName] = { rows, circularLayout, isCircular: true, toolAddedCommentHeaders: new Set() };
         worksheets[sheetName] = ws;
       });
       fileSessions[f.name] = { fileName: f.name, fileHandle: f.handle, workbook, worksheets, tabs };
@@ -1009,7 +1227,10 @@ function renderSwitchList() {
   container.innerHTML = `<div class="ff-label">FILES LOADED — CLICK TO SET "THIS FILE", DRAG TO REORDER</div>` +
     names.map((n) => {
       const isCurrent = n === activeFileName;
-      const briefCount = getBriefsForSession(fileSessions[n]).length;
+      // Counts BOTH shapes a file's rows can be read as — a circular file
+      // has zero standard "briefs", so without this it would misleadingly
+      // show "0 briefs" in this list despite being fully loaded and usable.
+      const briefCount = getBriefsForSession(fileSessions[n]).length + getCircularBriefsForSession(fileSessions[n]).length;
       return `<div class="ff-item ${isCurrent ? "ff-current" : ""}" data-file="${esc(n)}" draggable="true">
         <span class="ff-left">
           <span class="ff-handle" title="Drag to reorder">&#8942;&#8942;</span>
@@ -1107,6 +1328,7 @@ function switchViewMode(mode) {
 function getBriefsForSession(session) {
   const briefs = [];
   Object.entries(session.tabs).forEach(([sheetName, tab]) => {
+    if (tab.isCircular) return; // circular tabs have no tab.cols — see getCircularBriefsForSession()
     for (let r = 1; r < tab.rows.length; r++) {
       const row = tab.rows[r];
       if (!row) continue;
@@ -1153,6 +1375,69 @@ function getAllBriefs() {
   return all;
 }
 
+// ---------------------------------------------------- reading (circular) --
+// Same idea as getBriefsForSession() above, but for "circular" tabs (see
+// detectCircularLayout()): instead of one department/status/comment per
+// row, a row can have several departments, each with its own status and/or
+// comment value. Every value is read fresh from tab.rows at render time,
+// exactly like the standard path — rows stays the one source of truth.
+function getCircularBriefsForSession(session) {
+  const briefs = [];
+  Object.entries(session.tabs).forEach(([sheetName, tab]) => {
+    if (!tab.isCircular) return;
+    const layout = tab.circularLayout;
+    for (let r = 1; r < tab.rows.length; r++) {
+      const row = tab.rows[r];
+      if (!row) continue;
+      const requirementFull = trimmed(row[layout.requirement]);
+      if (!requirementFull) continue;
+
+      const departmentRaw = layout.department >= 0 ? trimmed(row[layout.department]) : "";
+      const managementComments = layout.managementComments >= 0 ? trimmed(row[layout.managementComments]) : "";
+
+      // Group every per-department field that actually HAS a value for this
+      // row (an empty cell for e.g. a department that isn't relevant to
+      // this particular requirement is simply left out, per the "only show
+      // if available" rule) under its department; fields with no department
+      // (a one-off standalone column, or a bare Status/Review that had
+      // nothing to its left to attach to) go in their own list instead.
+      const groupsMap = new Map(); // department -> { department, statusFields: [], commentFields: [] }
+      const standaloneFields = [];
+      layout.fields.forEach((field) => {
+        const value = trimmed(row[field.colIdx]);
+        if (!value) return;
+        const entry = { header: field.header, value, colIdx: field.colIdx, isBare: field.isBare };
+        if (!field.department) { standaloneFields.push({ ...entry, kind: field.kind }); return; }
+        if (!groupsMap.has(field.department)) groupsMap.set(field.department, { department: field.department, statusFields: [], commentFields: [] });
+        const group = groupsMap.get(field.department);
+        (field.kind === "comment" ? group.commentFields : group.statusFields).push(entry);
+      });
+
+      const { preview } = truncateBrief(requirementFull);
+      const id = `${session.fileName}::${sheetName}::${r}`;
+      briefs.push({
+        id,
+        sourceFile: session.fileName,
+        sourceSheet: sheetName,
+        rowIndex: r,
+        requirementFull,
+        requirementPreview: preview,
+        departmentRaw,
+        departments: parseDepartments(departmentRaw),
+        groups: [...groupsMap.values()],
+        standaloneFields,
+        managementComments,
+      });
+    }
+  });
+  return briefs;
+}
+function getAllCircularBriefs() {
+  const all = [];
+  Object.values(fileSessions).forEach((session) => all.push(...getCircularBriefsForSession(session)));
+  return all;
+}
+
 // ------------------------------------------------------------------ writing --
 
 function lastBriefRowIndex(tab) {
@@ -1165,6 +1450,17 @@ function lastBriefRowIndex(tab) {
 function ensureRowLength(row, width) {
   while (row.length < width) row.push(null);
   return row;
+}
+
+// Re-runs column detection for a tab against its (possibly just-changed)
+// header row — used after adding a column, so the new column is correctly
+// picked up (e.g. as the new "latest comment", or the new Management
+// Comments column). Branches on which detection scheme this tab uses so
+// the same add-a-column code (ensureUpdatedCommentColumn,
+// ensureManagementCommentColumn) works for both standard and circular tabs.
+function redetectTabColumns(tab) {
+  if (tab.isCircular) tab.circularLayout = detectCircularLayout(tab.rows[0]);
+  else tab.cols = detectComplianceColumns(tab.rows[0]);
 }
 
 // Writes the given field values into a specific brief's row, in the exact
@@ -1216,7 +1512,7 @@ function ensureUpdatedCommentColumn(session, sheetName, rowIndex, headerText, va
     ensureRowLength(tab.rows[rowIndex], colIdx + 1);
   }
   tab.rows[rowIndex][colIdx] = value;
-  tab.cols = detectComplianceColumns(tab.rows[0]); // re-detect so "comment" picks up this new rightmost column
+  redetectTabColumns(tab); // re-detect so "comment" (or, for a circular tab, the field list) picks up this new rightmost column
 
   if (ws) {
     const excelCol = colIdx + 1; // ExcelJS columns are 1-indexed
@@ -1246,6 +1542,82 @@ function ensureUpdatedCommentColumn(session, sheetName, rowIndex, headerText, va
 // used in the real report files' own "Updated Comments dated ..." headers.
 function formatHeaderDate(d) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// ------------------------------------------------- writing (circular) --
+// Writes every field of a circular row's Edit form back in one go: the
+// Requirement Detail text, the raw Relevant Department text, every
+// per-department status/comment cell the Edit modal showed an input for,
+// and (if the form's Management Comments box was changed) that column too
+// — same "straight into tab.rows AND the live worksheet cell, formatting
+// left alone" approach as writeBriefFields() above.
+function writeCircularRowFields(session, sheetName, rowIndex, data) {
+  const tab = session.tabs[sheetName];
+  const layout = tab.circularLayout;
+  const row = ensureRowLength(tab.rows[rowIndex], tab.rows[0].length);
+  const ws = session.worksheets[sheetName];
+  const wsRow = ws ? ws.getRow(rowIndex + 1) : null;
+
+  function setField(colIdx, value) {
+    if (colIdx == null || colIdx < 0) return;
+    row[colIdx] = value;
+    if (wsRow) wsRow.getCell(colIdx + 1).value = value;
+  }
+
+  setField(layout.requirement, data.requirement);
+  setField(layout.department, data.departmentRaw);
+  if (layout.managementComments >= 0) setField(layout.managementComments, data.managementComments);
+  Object.entries(data.fieldValues || {}).forEach(([colIdx, value]) => setField(Number(colIdx), value));
+}
+
+// "Add Management Comment": APPENDS a new, dated entry to this row's single
+// Management Comments cell (creating that column — always at the rightmost
+// position — the first time it's needed for this tab), rather than
+// replacing whatever's already there. This is deliberately different from
+// ensureUpdatedCommentColumn() above: Management Comments is always ONE
+// shared column that accumulates entries over time, not a fresh column per
+// comment. Returns the cell's new full value.
+function ensureManagementCommentColumn(session, sheetName, rowIndex, text) {
+  const tab = session.tabs[sheetName];
+  const layout = tab.circularLayout;
+  const header = tab.rows[0];
+  const ws = session.worksheets[sheetName];
+  let colIdx = layout.managementComments;
+  const isNewColumn = colIdx == null || colIdx < 0;
+
+  if (isNewColumn) {
+    colIdx = header.length;
+    tab.rows.forEach((row) => { ensureRowLength(row, colIdx + 1); });
+    tab.rows[0][colIdx] = "Management Comments";
+  } else {
+    ensureRowLength(tab.rows[rowIndex], colIdx + 1);
+  }
+
+  const existing = trimmed(tab.rows[rowIndex][colIdx]);
+  const entry = `[${formatHeaderDate(new Date())}] ${text}`;
+  const newValue = existing ? `${existing}\n\n${entry}` : entry;
+  tab.rows[rowIndex][colIdx] = newValue;
+  redetectTabColumns(tab);
+
+  if (ws) {
+    const excelCol = colIdx + 1;
+    if (isNewColumn) {
+      const templateCol = excelCol - 1;
+      const headerCell = ws.getRow(1).getCell(excelCol);
+      headerCell.value = "Management Comments";
+      const templateHeaderCell = ws.getRow(1).getCell(templateCol);
+      if (templateHeaderCell.style) headerCell.style = { ...templateHeaderCell.style };
+      const templateWidth = ws.getColumn(templateCol).width;
+      if (templateWidth) ws.getColumn(excelCol).width = templateWidth;
+    }
+    const dataCell = ws.getRow(rowIndex + 1).getCell(excelCol);
+    if (isNewColumn) {
+      const templateDataCell = ws.getRow(rowIndex + 1).getCell(excelCol - 1);
+      if (templateDataCell.style) dataCell.style = { ...templateDataCell.style };
+    }
+    dataCell.value = newValue;
+  }
+  return newValue;
 }
 
 // Removes a "New Comment (Updated)" column entirely — tab-wide, since it's
@@ -1350,6 +1722,18 @@ function activeBriefs() {
   const session = fileSessions[activeFileName];
   return session ? getBriefsForSession(session) : [];
 }
+// Same idea as activeBriefs(), for circular-format tabs — kept as a
+// separate list throughout (not merged into activeBriefs()) because its
+// items have a different shape (several departments per row instead of
+// one) that the department/status/IA-Validation filter chips below aren't
+// built to understand; circular tabs get their own render pass
+// (renderCircularGroups) instead, further down, so they still show up in
+// whichever view (This file / All files) is currently active.
+function activeCircularBriefs() {
+  if (viewMode === "combined") return getAllCircularBriefs();
+  const session = fileSessions[activeFileName];
+  return session ? getCircularBriefsForSession(session) : [];
+}
 function activeState() { return viewMode === "combined" ? combinedState : state; }
 
 function matchesFilters(b, st) {
@@ -1369,16 +1753,22 @@ function matchesFilters(b, st) {
 
 function renderCurrentView() {
   const briefs = activeBriefs();
+  const circularBriefs = activeCircularBriefs();
   const st = activeState();
-  if (st.openTabs.size === 0) st.openTabs = new Set(orderedTabs(briefs)); // default-open on first render for this view
+  // Tabs (sheet names) are shared between the two openTabs/openBriefs sets
+  // on `st` — a given sheet is detected as EITHER standard OR circular,
+  // never both, so there's no risk of a circular tab and a standard tab
+  // colliding on the same name here.
+  if (st.openTabs.size === 0) st.openTabs = new Set([...orderedTabs(briefs), ...orderedTabs(circularBriefs)]); // default-open on first render for this view
 
   const isCombined = viewMode === "combined";
   document.getElementById("reportTitle").textContent = isCombined
     ? "All files in folder — combined view"
     : (activeFileName || "Compliance Briefs");
+  const totalCount = briefs.length + circularBriefs.length;
   document.getElementById("periodLine").textContent = isCombined
-    ? `${briefs.length} briefs across ${Object.keys(fileSessions).length} file(s)`
-    : `${briefs.length} briefs in this file`;
+    ? `${totalCount} item(s) across ${Object.keys(fileSessions).length} file(s)`
+    : `${totalCount} item(s) in this file`;
   document.getElementById("footerNote").textContent =
     `Compliance Dashboard · editing locally in your browser · Sub Team is saved locally, never written to the source files`;
 
@@ -1391,6 +1781,7 @@ function renderCurrentView() {
   document.getElementById("sourceFilterWrap").style.display = isCombined ? "" : "none";
   if (isCombined) renderSourceChips(briefs, st);
   renderGroups(briefs, st);
+  renderCircularGroups(circularBriefs, st);
 
   const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
@@ -1688,6 +2079,155 @@ function wireGroupInteractions(container, st) {
   });
 }
 
+// ------------------------------------------------------- render (circular) --
+// Renders circular-format tabs as their own <details> groups, right below
+// the standard ones — same tab-group / brief-card look (reuses the exact
+// CSS classes), but each "brief card" here is a Requirement Detail row with
+// its own very different content: Relevant Department tags on the
+// collapsed summary; on expand, one block PER DEPARTMENT that actually has
+// a status and/or comment value for this row (departments with nothing to
+// show for this particular requirement are simply left out — the "only
+// show if available" rule), any standalone (not department-specific)
+// fields, and the shared Management Comments block. Filtering here is
+// deliberately simple — just the free-text search box, shared with the
+// standard briefs above — since the chip filters (department/status/IA
+// Validation) above are built around the standard one-status-per-row shape
+// and don't translate cleanly to "several departments, each with its own
+// status, per row".
+function matchesCircularQuery(b, st) {
+  if (!st.query) return true;
+  const q = st.query.toLowerCase();
+  if (b.requirementFull.toLowerCase().includes(q)) return true;
+  if (b.managementComments.toLowerCase().includes(q)) return true;
+  const inFields = (list) => list.some((f) => f.value.toLowerCase().includes(q));
+  if (b.groups.some((g) => inFields(g.statusFields) || inFields(g.commentFields))) return true;
+  if (inFields(b.standaloneFields)) return true;
+  return false;
+}
+
+function renderCircularGroups(allCircularBriefsForView, st) {
+  const container = document.getElementById("circularGroups");
+  if (!container) return;
+  const tabs = orderedTabs(allCircularBriefsForView);
+  if (tabs.length === 0) { container.innerHTML = ""; return; }
+  const depts = allDepartmentsSorted(allCircularBriefsForView);
+  const filtered = allCircularBriefsForView.filter((b) => matchesCircularQuery(b, st));
+
+  let html = `<div class="section-controls"><div class="title">Circulars by tab</div></div>`;
+  tabs.forEach((tab) => {
+    const allInTab = allCircularBriefsForView.filter((b) => b.sourceSheet === tab);
+    if (allInTab.length === 0) return;
+    const items = filtered.filter((b) => b.sourceSheet === tab);
+    const isOpen = st.openTabs.has(tab);
+
+    html += `<details class="tab-group ${isOpen ? "open" : ""}" data-tab-group="${esc(tab)}" ${isOpen ? "open" : ""}>
+      <summary>
+        <span class="chev"></span>
+        <span class="tab-dot" style="background:var(--tag-${tabs.indexOf(tab) % 6})"></span>
+        <span class="tab-name">${esc(tab)}</span>
+        <span class="tab-count">${items.length} of ${allInTab.length} shown</span>
+      </summary>
+      <div class="tab-body">`;
+
+    if (items.length === 0) {
+      html += `<div class="empty-note">No requirements in this tab match the current search.</div>`;
+    } else {
+      items.forEach((b, i) => {
+        const isBriefOpen = st.openBriefs.has(b.id);
+        html += `<details class="brief-card ${isBriefOpen ? "open" : ""}" data-brief-id="${esc(b.id)}" ${isBriefOpen ? "open" : ""}>
+          <summary>
+            <span class="brief-idx">${String(i + 1).padStart(2, "0")}</span>
+            <div class="brief-main">
+              <div class="brief-preview">${esc(b.requirementPreview)}</div>
+              <div class="badges">
+                ${b.departments.map((d) => `<span class="badge dept-${deptColorIndex(d, depts)}">${esc(d)}</span>`).join("")}
+                ${viewMode === "combined" ? `<span class="badge source-badge">${esc(b.sourceFile)}</span>` : ""}
+              </div>
+            </div>
+            <span class="chev brief-chev"></span>
+          </summary>
+          <div class="brief-detail">
+            <div class="detail-block">
+              <span class="detail-label">Requirement Detail</span>
+              ${esc(b.requirementFull)}
+            </div>
+            ${b.groups.map((g) => `<div class="field-box on" style="margin-bottom:10px;">
+              <span class="k">${esc(g.department)}</span>
+              ${[
+                ...g.statusFields.map((f) => ({ ...f, genericLabel: "Status" })),
+                ...g.commentFields.map((f) => ({ ...f, genericLabel: "Comment" })),
+              ].map((f) => `<div style="margin-top:4px;"><span class="v" style="display:block; white-space:pre-wrap;"><strong>${esc(f.isBare ? f.header : f.genericLabel)}:</strong> ${esc(f.value)}</span></div>`).join("")}
+            </div>`).join("")}
+            ${b.standaloneFields.map((f) => `<div class="field-box on" style="margin-bottom:10px;">
+              <span class="k">${esc(f.header)}</span>
+              <span class="v" style="display:block; white-space:pre-wrap;">${esc(f.value)}</span>
+            </div>`).join("")}
+            <div class="detail-block">
+              <span class="detail-label">Management Comments</span>
+              ${b.managementComments ? esc(b.managementComments) : "No management comments yet."}
+            </div>
+            <div class="row-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-circ-edit-file="${esc(b.sourceFile)}" data-circ-edit-sheet="${esc(b.sourceSheet)}" data-circ-edit-row="${b.rowIndex}">Edit</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-mgmtcomment-file="${esc(b.sourceFile)}" data-mgmtcomment-sheet="${esc(b.sourceSheet)}" data-mgmtcomment-row="${b.rowIndex}">Add Management Comment</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-newcomment-file="${esc(b.sourceFile)}" data-newcomment-sheet="${esc(b.sourceSheet)}" data-newcomment-row="${b.rowIndex}">Add Updated Comment</button>
+            </div>
+          </div>
+        </details>`;
+      });
+    }
+    html += `</div></details>`;
+  });
+
+  container.innerHTML = html;
+  wireCircularGroupInteractions(container, st);
+}
+
+function wireCircularGroupInteractions(container, st) {
+  container.querySelectorAll(".tab-group").forEach((det) => {
+    det.addEventListener("toggle", () => {
+      const t = det.getAttribute("data-tab-group");
+      if (det.open) st.openTabs.add(t); else st.openTabs.delete(t);
+    });
+  });
+  container.querySelectorAll(".brief-card").forEach((det) => {
+    det.addEventListener("toggle", () => {
+      const id = det.getAttribute("data-brief-id");
+      if (det.open) st.openBriefs.add(id); else st.openBriefs.delete(id);
+    });
+  });
+  container.querySelectorAll("[data-circ-edit-file]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openCircularModal({
+        sourceFile: btn.getAttribute("data-circ-edit-file"),
+        sourceSheet: btn.getAttribute("data-circ-edit-sheet"),
+        rowIndex: Number(btn.getAttribute("data-circ-edit-row")),
+      });
+    });
+  });
+  container.querySelectorAll("[data-mgmtcomment-file]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openManagementCommentModal({
+        sourceFile: btn.getAttribute("data-mgmtcomment-file"),
+        sourceSheet: btn.getAttribute("data-mgmtcomment-sheet"),
+        rowIndex: Number(btn.getAttribute("data-mgmtcomment-row")),
+      });
+    });
+  });
+  // "Add Updated Comment" reuses the EXACT SAME modal and ensureUpdatedCommentColumn()
+  // the standard briefs' "New Comment (Updated)" button already uses — see
+  // redetectTabColumns() for the one change that made that function work
+  // for circular tabs too.
+  container.querySelectorAll("[data-newcomment-file]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      openNewCommentModal({
+        sourceFile: btn.getAttribute("data-newcomment-file"),
+        sourceSheet: btn.getAttribute("data-newcomment-sheet"),
+        rowIndex: Number(btn.getAttribute("data-newcomment-row")),
+      });
+    });
+  });
+}
+
 document.getElementById("searchBox").addEventListener("input", (e) => {
   activeState().query = e.target.value;
   renderCurrentView();
@@ -1751,7 +2291,13 @@ function populateTabSelect(fileName) {
   const session = fileSessions[fileName];
   const tabSelect = document.getElementById("f_tab");
   if (!session) { tabSelect.innerHTML = ""; return; }
-  tabSelect.innerHTML = Object.keys(session.tabs).map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  // Only standard tabs: "Add brief" writes brief/department/status/IA
+  // Validation/comment fields a circular tab (see detectCircularLayout())
+  // doesn't have — adding a new circular-format row isn't supported here,
+  // only editing existing ones (via the circular Edit modal).
+  tabSelect.innerHTML = Object.entries(session.tabs)
+    .filter(([, tab]) => !tab.isCircular)
+    .map(([t]) => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
 }
 document.getElementById("f_file").addEventListener("change", (e) => populateTabSelect(e.target.value));
 
@@ -1804,6 +2350,133 @@ document.getElementById("briefForm").addEventListener("submit", async (e) => {
     closeModal();
     await saveSession(session);
   }
+  renderSwitchList();
+  renderCurrentView();
+});
+
+// ---------------------------------------------------- CIRCULAR EDIT MODAL --
+// One Edit modal for every circular-tab row, covering "everything should
+// be editable": Requirement Detail, Relevant Department(s), Management
+// Comments, and one input per per-department/standalone field this tab's
+// layout has (see detectCircularLayout()). Unlike the standard brief modal
+// above, the field LIST isn't fixed — it's rebuilt every time the modal
+// opens, from that specific tab's own columns — so the inputs are built
+// into #circ_fields dynamically rather than living in the static HTML.
+
+let circularEditRef = null; // {sourceFile, sourceSheet, rowIndex}
+
+function openCircularModal(ref) {
+  circularEditRef = ref;
+  const session = fileSessions[ref.sourceFile];
+  const tab = session && session.tabs[ref.sourceSheet];
+  if (!tab) return;
+  const layout = tab.circularLayout;
+  const row = tab.rows[ref.rowIndex] || [];
+
+  document.getElementById("circ_requirement").value = trimmed(row[layout.requirement]);
+  document.getElementById("circ_department").value = layout.department >= 0 ? trimmed(row[layout.department]) : "";
+  document.getElementById("circ_management").value = layout.managementComments >= 0 ? trimmed(row[layout.managementComments]) : "";
+
+  // One field per column the tab's layout tracks, grouped visually by
+  // department (standalone fields — no department — listed last), each
+  // tagged with data-colidx so the submit handler below can read every
+  // input back by its real column, whatever that happens to be in this tab.
+  const groups = new Map();
+  const standalone = [];
+  layout.fields.forEach((f) => {
+    const entry = { ...f, value: trimmed(row[f.colIdx]) };
+    if (f.department) {
+      if (!groups.has(f.department)) groups.set(f.department, []);
+      groups.get(f.department).push(entry);
+    } else {
+      standalone.push(entry);
+    }
+  });
+
+  const fieldHtml = (f) => {
+    const label = `${esc(f.header)}${f.kind === "comment" ? "" : " (status)"}`;
+    const control = f.kind === "comment"
+      ? `<textarea data-colidx="${f.colIdx}">${esc(f.value)}</textarea>`
+      : `<input type="text" data-colidx="${f.colIdx}" value="${esc(f.value)}">`;
+    return `<div class="field"><label>${label}</label>${control}</div>`;
+  };
+
+  let html = "";
+  groups.forEach((fields, dept) => {
+    html += `<div class="field-box on" style="margin-bottom:10px;"><span class="k">${esc(dept)}</span></div>` +
+      fields.map(fieldHtml).join("");
+  });
+  html += standalone.map(fieldHtml).join("");
+  document.getElementById("circ_fields").innerHTML = html || `<p style="font-size:12.5px; color:var(--text-lo);">This tab has no per-department status/comment columns besides Management Comments above.</p>`;
+
+  document.getElementById("circularModalBackdrop").style.display = "flex";
+}
+function closeCircularModal() {
+  document.getElementById("circularModalBackdrop").style.display = "none";
+  circularEditRef = null;
+}
+document.getElementById("circularModalCancelBtn").addEventListener("click", closeCircularModal);
+document.getElementById("circularModalBackdrop").addEventListener("click", (e) => {
+  if (e.target.id === "circularModalBackdrop") closeCircularModal();
+});
+document.getElementById("circularBriefForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!circularEditRef) return;
+  const requirement = document.getElementById("circ_requirement").value.trim();
+  if (!requirement) { alert("Requirement Detail text is required."); return; }
+
+  const fieldValues = {};
+  document.querySelectorAll("#circ_fields [data-colidx]").forEach((el) => {
+    fieldValues[el.getAttribute("data-colidx")] = el.value.trim();
+  });
+
+  const session = fileSessions[circularEditRef.sourceFile];
+  writeCircularRowFields(session, circularEditRef.sourceSheet, circularEditRef.rowIndex, {
+    requirement,
+    departmentRaw: document.getElementById("circ_department").value.trim(),
+    managementComments: document.getElementById("circ_management").value.trim(),
+    fieldValues,
+  });
+  closeCircularModal();
+  await saveSession(session);
+  renderSwitchList();
+  renderCurrentView();
+});
+
+// ---------------------------------------------------- "ADD MANAGEMENT COMMENT" --
+// A small, single-field modal: submitting it APPENDS a dated entry to this
+// row's Management Comments cell via ensureManagementCommentColumn() above
+// — distinct from the circular Edit modal's own Management Comments
+// textarea, which instead REPLACES the cell outright (for when the text
+// itself needs correcting, not added to).
+
+let managementCommentRef = null; // {sourceFile, sourceSheet, rowIndex}
+
+function openManagementCommentModal(ref) {
+  managementCommentRef = ref;
+  document.getElementById("mc_comment").value = "";
+  document.getElementById("managementCommentBackdrop").style.display = "flex";
+  document.getElementById("mc_comment").focus();
+}
+function closeManagementCommentModal() {
+  document.getElementById("managementCommentBackdrop").style.display = "none";
+  managementCommentRef = null;
+}
+document.getElementById("managementCommentCancelBtn").addEventListener("click", closeManagementCommentModal);
+document.getElementById("managementCommentBackdrop").addEventListener("click", (e) => {
+  if (e.target.id === "managementCommentBackdrop") closeManagementCommentModal();
+});
+document.getElementById("managementCommentForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!managementCommentRef) return;
+  const text = document.getElementById("mc_comment").value.trim();
+  if (!text) { alert("Comment text is required."); return; }
+
+  const session = fileSessions[managementCommentRef.sourceFile];
+  if (!session) { closeManagementCommentModal(); return; }
+  ensureManagementCommentColumn(session, managementCommentRef.sourceSheet, managementCommentRef.rowIndex, text);
+  closeManagementCommentModal();
+  await saveSession(session);
   renderSwitchList();
   renderCurrentView();
 });
