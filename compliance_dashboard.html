@@ -465,9 +465,20 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
     <div id="groups"></div>
 
     <!-- "Circular" files (a different column layout — see detectCircularLayout()
-         in app.js) render into this separate container, right below the
-         standard SO/SSO/Annexure-style ones above. Left empty (no heading
-         shown) when the currently open file(s) have no circular-format tabs. -->
+         in app.js) render into this separate section, right below the
+         standard SO/SSO/Annexure-style ones above — its own stat row and
+         filters (by Requirement Detail count, not "briefs"), since a
+         circular row's shape (several departments each with their own
+         status) doesn't fit the standard filters above. All of it stays
+         empty (no heading, no stats) when the currently open file(s) have
+         no circular-format tabs — see renderCircularGroups() in app.js. -->
+    <div class="stat-row" id="circularStatRow" style="display:none;"></div>
+    <div class="filters" id="circularFilters" style="display:none;">
+      <div class="filter-label">FILTER BY MANAGEMENT COMMENTS</div>
+      <div class="chip-row" id="circMgmtChips"></div>
+      <div class="filter-label">FILTER BY COMPLIANCE</div>
+      <div class="chip-row" id="circCompliantChips"></div>
+    </div>
     <div id="circularGroups"></div>
   </div>
 
@@ -861,6 +872,35 @@ function truncateBrief(text, maxSentences, hardCap) {
   return { preview: isTruncated ? preview + " ........" : preview, isTruncated };
 }
 
+// A simpler, character-count-based truncation used for circular files'
+// Requirement Detail previews instead of truncateBrief() above.
+// truncateBrief() tries to cut at sentence boundaries (a period/!/?), which
+// works for normal prose but badly misreads legal/clause text like
+// "iv. Enforce security... (Internet or Mobile Banking etc.)." — the
+// leading "iv." and abbreviations like "etc." each read as their own tiny
+// "sentence", so it could end up showing almost nothing (just "iv. )."),
+// leaving some collapsed rows far shorter than others. This instead always
+// takes a fixed amount of TEXT regardless of punctuation, snapped to the
+// nearest whole word, so every collapsed row previews a similar, decent
+// amount and the row heights stay consistent.
+function truncateByLength(text, maxChars) {
+  maxChars = maxChars || 220;
+  const clean = trimmed(text).replace(/\s+/g, " ");
+  if (!clean) return { preview: "", isTruncated: false };
+  if (clean.length <= maxChars) return { preview: clean, isTruncated: false };
+  let cut = clean.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  if (lastSpace > maxChars * 0.6) cut = cut.slice(0, lastSpace); // don't chop mid-word unless the word itself is huge
+  return { preview: cut.trim() + " ........", isTruncated: true };
+}
+
+// A department status value counts as "Compliant" only when it plainly
+// SAYS so — "Complied" or "Compliant" (not "Non-Compliant", which starts
+// with "Non" so this never matches it, and not "Partially Compliant",
+// which starts with "Partially"). Used by the circular files' "All
+// Compliant" stat/filter below.
+const COMPLIANT_STATUS_RE = /^(complied|compliant)\b/i;
+
 function parseDepartments(raw) {
   const text = trimmed(raw)
     // Remove stray "N/A" notes (sometimes left in this column as e.g.
@@ -1206,7 +1246,11 @@ async function loadSessionsFromHandles(fileHandles) {
 }
 
 function freshFilterState() {
-  return { tab: null, department: null, status: null, iav: null, subteam: null, source: null, query: "", openTabs: new Set(), openBriefs: new Set() };
+  return {
+    tab: null, department: null, status: null, iav: null, subteam: null, source: null, query: "",
+    circMgmt: null, circCompliant: null, // circular files' own two filters — see renderCircularGroups()
+    openTabs: new Set(), openBriefs: new Set(),
+  };
 }
 
 // Returns the loaded file names in the user's own chosen order (fileOrder),
@@ -1403,17 +1447,26 @@ function getCircularBriefsForSession(session) {
       // nothing to its left to attach to) go in their own list instead.
       const groupsMap = new Map(); // department -> { department, statusFields: [], commentFields: [] }
       const standaloneFields = [];
+      const presentStatusValues = []; // every status-kind value THIS row actually has, wherever it came from — see allCompliant below
       layout.fields.forEach((field) => {
         const value = trimmed(row[field.colIdx]);
         if (!value) return;
         const entry = { header: field.header, value, colIdx: field.colIdx, isBare: field.isBare };
+        if (field.kind === "status") presentStatusValues.push(value);
         if (!field.department) { standaloneFields.push({ ...entry, kind: field.kind }); return; }
         if (!groupsMap.has(field.department)) groupsMap.set(field.department, { department: field.department, statusFields: [], commentFields: [] });
         const group = groupsMap.get(field.department);
         (field.kind === "comment" ? group.commentFields : group.statusFields).push(entry);
       });
 
-      const { preview } = truncateBrief(requirementFull);
+      // "All Compliant" — every status value THIS row has must say Complied/
+      // Compliant, AND there must be at least one to begin with: a row with
+      // no status values at all is never "All Compliant" just because
+      // nothing contradicts it — a missing value is not the same as a
+      // compliant one.
+      const allCompliant = presentStatusValues.length > 0 && presentStatusValues.every((v) => COMPLIANT_STATUS_RE.test(v));
+
+      const { preview } = truncateByLength(requirementFull);
       const id = `${session.fileName}::${sheetName}::${r}`;
       briefs.push({
         id,
@@ -1427,6 +1480,8 @@ function getCircularBriefsForSession(session) {
         groups: [...groupsMap.values()],
         standaloneFields,
         managementComments,
+        hasManagementComments: !!managementComments,
+        allCompliant,
       });
     }
   });
@@ -1781,9 +1836,15 @@ function renderCurrentView() {
   document.getElementById("sourceFilterWrap").style.display = isCombined ? "" : "none";
   if (isCombined) renderSourceChips(briefs, st);
   renderGroups(briefs, st);
+
+  renderCircularStats(circularBriefs);
+  const circularFiltersEl = document.getElementById("circularFilters");
+  if (circularFiltersEl) circularFiltersEl.style.display = circularBriefs.length > 0 ? "" : "none";
+  renderCircMgmtChips(circularBriefs, st);
+  renderCircCompliantChips(circularBriefs, st);
   renderCircularGroups(circularBriefs, st);
 
-  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query;
+  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circMgmt || st.circCompliant;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
   document.getElementById("searchBox").value = st.query;
 }
@@ -2105,13 +2166,83 @@ function matchesCircularQuery(b, st) {
   return false;
 }
 
+// Circular files get their own two filters (Has Management Comments / All
+// Compliant) instead of the standard department/status/IA Validation chips,
+// which are built around the standard one-status-per-row shape. This ANDs
+// the free-text query match (above) with those two.
+function matchesCircularFilters(b, st) {
+  if (!matchesCircularQuery(b, st)) return false;
+  if (st.circMgmt === "yes" && !b.hasManagementComments) return false;
+  if (st.circMgmt === "no" && b.hasManagementComments) return false;
+  if (st.circCompliant === "yes" && !b.allCompliant) return false;
+  if (st.circCompliant === "no" && b.allCompliant) return false;
+  return true;
+}
+
+// Stat row for circular files: Total Requirement Details, Has Management
+// Comments, All Compliant — replaces the standard brief-count stats, which
+// are always 0 for a circular-only file since it has no "Brief" column.
+function renderCircularStats(circularBriefs) {
+  const row = document.getElementById("circularStatRow");
+  if (!row) return;
+  if (circularBriefs.length === 0) { row.style.display = "none"; row.innerHTML = ""; return; }
+  const total = circularBriefs.length;
+  const withMgmt = circularBriefs.filter((b) => b.hasManagementComments).length;
+  const compliant = circularBriefs.filter((b) => b.allCompliant).length;
+  const items = [
+    { n: total, l: "Total Requirement Details" },
+    { n: withMgmt, l: "Has Management Comments", cls: "accent-iav" },
+    { n: compliant, l: "All Compliant", cls: "accent-closed" },
+  ];
+  row.style.display = "";
+  row.innerHTML = items.map(
+    (s) => `<div class="stat ${s.cls || ""}"><span class="n">${s.n}</span><span class="l">${esc(s.l)}</span></div>`
+  ).join("");
+}
+
+function renderCircMgmtChips(circularBriefs, st) {
+  const el = document.getElementById("circMgmtChips");
+  if (!el) return;
+  const yesCount = circularBriefs.filter((b) => b.hasManagementComments).length;
+  const noCount = circularBriefs.length - yesCount;
+  el.innerHTML = `
+    <button type="button" class="chip ${st.circMgmt === "yes" ? "active" : ""}" data-circmgmt="yes">Has Management Comments <span class="count">${yesCount}</span></button>
+    <button type="button" class="chip ${st.circMgmt === "no" ? "active" : ""}" data-circmgmt="no">No Management Comments <span class="count">${noCount}</span></button>
+  `;
+  el.querySelectorAll("[data-circmgmt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.getAttribute("data-circmgmt");
+      st.circMgmt = st.circMgmt === v ? null : v;
+      renderCurrentView();
+    });
+  });
+}
+
+function renderCircCompliantChips(circularBriefs, st) {
+  const el = document.getElementById("circCompliantChips");
+  if (!el) return;
+  const yesCount = circularBriefs.filter((b) => b.allCompliant).length;
+  const noCount = circularBriefs.length - yesCount;
+  el.innerHTML = `
+    <button type="button" class="chip ${st.circCompliant === "yes" ? "active" : ""}" data-circcompliant="yes">All Compliant <span class="count">${yesCount}</span></button>
+    <button type="button" class="chip ${st.circCompliant === "no" ? "active" : ""}" data-circcompliant="no">Not Fully Compliant <span class="count">${noCount}</span></button>
+  `;
+  el.querySelectorAll("[data-circcompliant]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.getAttribute("data-circcompliant");
+      st.circCompliant = st.circCompliant === v ? null : v;
+      renderCurrentView();
+    });
+  });
+}
+
 function renderCircularGroups(allCircularBriefsForView, st) {
   const container = document.getElementById("circularGroups");
   if (!container) return;
   const tabs = orderedTabs(allCircularBriefsForView);
   if (tabs.length === 0) { container.innerHTML = ""; return; }
   const depts = allDepartmentsSorted(allCircularBriefsForView);
-  const filtered = allCircularBriefsForView.filter((b) => matchesCircularQuery(b, st));
+  const filtered = allCircularBriefsForView.filter((b) => matchesCircularFilters(b, st));
 
   let html = `<div class="section-controls"><div class="title">Circulars by tab</div></div>`;
   tabs.forEach((tab) => {
@@ -2235,6 +2366,7 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 document.getElementById("clearFiltersBtn").addEventListener("click", () => {
   const st = activeState();
   st.tab = null; st.department = null; st.status = null; st.iav = null; st.subteam = null; st.source = null; st.query = "";
+  st.circMgmt = null; st.circCompliant = null;
   renderCurrentView();
 });
 document.getElementById("toggleAllBtn").addEventListener("click", (e) => {
