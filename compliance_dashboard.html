@@ -424,31 +424,40 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
     </div>
 
     <div class="filters">
-      <!-- Which tab (SO / SSO / Annexure / Appendix / ...) a brief came
-           from — the primary tag, used both as the grouping below and as
-           a filter. -->
-      <div class="filter-label">FILTER BY TAB</div>
-      <div class="chip-row" id="tabChips"></div>
+      <!-- All of this — tab/department/status/IA Validation filters, plus
+           Sub Team and Source File — is standard-briefs-only (keyed on the
+           Brief/IA Validation shape circular rows don't have), so it's
+           wrapped together and hidden whenever the file(s) in view have no
+           standard (non-circular) tabs at all. See hasStandardTabs() /
+           renderCurrentView() in app.js. The search box below stays
+           outside this wrapper since it's shared with circular rows. -->
+      <div id="standardFiltersWrap">
+        <!-- Which tab (SO / SSO / Annexure / Appendix / ...) a brief came
+             from — the primary tag, used both as the grouping below and as
+             a filter. -->
+        <div class="filter-label">FILTER BY TAB</div>
+        <div class="chip-row" id="tabChips"></div>
 
-      <div class="filter-label">FILTER BY DEPARTMENT</div>
-      <div class="chip-row" id="deptChips"></div>
+        <div class="filter-label">FILTER BY DEPARTMENT</div>
+        <div class="chip-row" id="deptChips"></div>
 
-      <div class="filter-label">FILTER BY STATUS</div>
-      <div class="chip-row" id="statusChips"></div>
+        <div class="filter-label">FILTER BY STATUS</div>
+        <div class="chip-row" id="statusChips"></div>
 
-      <div class="filter-label">FILTER BY IA VALIDATION</div>
-      <div class="chip-row" id="iavChips"></div>
+        <div class="filter-label">FILTER BY IA VALIDATION</div>
+        <div class="chip-row" id="iavChips"></div>
 
-      <!-- Only shown once at least one brief has a saved Sub Team tag. -->
-      <div id="subteamFilterWrap" style="display:none;">
-        <div class="filter-label">FILTER BY SUB TEAM</div>
-        <div class="chip-row" id="subteamChips"></div>
-      </div>
+        <!-- Only shown once at least one brief has a saved Sub Team tag. -->
+        <div id="subteamFilterWrap" style="display:none;">
+          <div class="filter-label">FILTER BY SUB TEAM</div>
+          <div class="chip-row" id="subteamChips"></div>
+        </div>
 
-      <!-- Only meaningful (and only shown) in "All files in folder" view. -->
-      <div id="sourceFilterWrap" style="display:none;">
-        <div class="filter-label">FILTER BY SOURCE FILE</div>
-        <div class="chip-row" id="sourceChips"></div>
+        <!-- Only meaningful (and only shown) in "All files in folder" view. -->
+        <div id="sourceFilterWrap" style="display:none;">
+          <div class="filter-label">FILTER BY SOURCE FILE</div>
+          <div class="chip-row" id="sourceChips"></div>
+        </div>
       </div>
 
       <div class="search-row">
@@ -457,12 +466,17 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
       </div>
     </div>
 
-    <div class="section-controls">
-      <div class="title">Briefs by tab</div>
-      <button type="button" class="toggle-all" id="toggleAllBtn">Collapse all</button>
-    </div>
+    <!-- The standard "Briefs by tab" heading + collapse-all control + the
+         briefs themselves — hidden together with standardFiltersWrap above
+         when there are no standard tabs in view. -->
+    <div id="standardGroupsWrap">
+      <div class="section-controls">
+        <div class="title">Briefs by tab</div>
+        <button type="button" class="toggle-all" id="toggleAllBtn">Collapse all</button>
+      </div>
 
-    <div id="groups"></div>
+      <div id="groups"></div>
+    </div>
 
     <!-- "Circular" files (a different column layout — see detectCircularLayout()
          in app.js) render into this separate section, right below the
@@ -476,8 +490,6 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
     <div class="filters" id="circularFilters" style="display:none;">
       <div class="filter-label">FILTER BY MANAGEMENT COMMENTS</div>
       <div class="chip-row" id="circMgmtChips"></div>
-      <div class="filter-label">FILTER BY BRANCHLESS COMPLIANCE</div>
-      <div class="chip-row" id="circCompliantChips"></div>
       <div class="filter-label">FILTER BY ACTION NEEDED</div>
       <div class="chip-row" id="circNeedsActionChips"></div>
     </div>
@@ -1816,6 +1828,18 @@ function activeCircularBriefs() {
 }
 function activeState() { return viewMode === "combined" ? combinedState : state; }
 
+// Whether the file(s) currently in view have any standard (non-circular)
+// tab at all — not just whether the current filters happen to leave 0
+// standard briefs showing. A circular-only file has none, and in that case
+// the whole standard-briefs UI (its stat row, Add brief button, tab/
+// department/status/IA Validation filters, and the "Briefs by tab" list)
+// is hidden rather than showing an empty "No briefs match" state that
+// doesn't apply to it.
+function hasStandardTabs() {
+  const sessions = viewMode === "combined" ? Object.values(fileSessions) : (fileSessions[activeFileName] ? [fileSessions[activeFileName]] : []);
+  return sessions.some((session) => Object.values(session.tabs).some((tab) => !tab.isCircular));
+}
+
 function matchesFilters(b, st) {
   if (st.tab && b.sourceSheet !== st.tab) return false;
   if (st.department && !b.departments.some((d) => d.toLowerCase() === st.department.toLowerCase())) return false;
@@ -1852,6 +1876,12 @@ function renderCurrentView() {
   document.getElementById("footerNote").textContent =
     `Compliance Dashboard · editing locally in your browser · Sub Team is saved locally, never written to the source files`;
 
+  const showStandard = hasStandardTabs();
+  document.getElementById("statRow").style.display = showStandard ? "" : "none";
+  document.getElementById("addBtn").style.display = showStandard ? "" : "none";
+  document.getElementById("standardFiltersWrap").style.display = showStandard ? "" : "none";
+  document.getElementById("standardGroupsWrap").style.display = showStandard ? "" : "none";
+
   renderStats(briefs);
   renderTabChips(briefs, st);
   renderDeptChips(briefs, st);
@@ -1866,7 +1896,6 @@ function renderCurrentView() {
   const circularFiltersEl = document.getElementById("circularFilters");
   if (circularFiltersEl) circularFiltersEl.style.display = circularBriefs.length > 0 ? "" : "none";
   renderCircMgmtChips(circularBriefs, st);
-  renderCircCompliantChips(circularBriefs, st);
   renderCircNeedsActionChips(circularBriefs, st);
   renderCircularGroups(circularBriefs, st);
 
