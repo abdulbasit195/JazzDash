@@ -995,8 +995,13 @@ function renderCurrentView() {
     `Risk Management Dashboard · deleting an issue also deletes its row in the Excel file · nothing is uploaded, everything runs in your browser`;
 
   renderStats(items);
-  renderOwnerChips(items, st);
-  renderDueChips(items, st);
+  // Cross-filtering: owner chips only list owners that have issues in the
+  // selected status/due bucket; status/due chips only list the buckets that
+  // the selected owner actually has. Counts follow the same rule.
+  const ownerPool = st.due ? items.filter((i) => i.dueStatus === st.due) : items;
+  const duePool = st.owner ? items.filter((i) => i.owner.toLowerCase() === st.owner.toLowerCase()) : items;
+  renderOwnerChips(ownerPool, st);
+  renderDueChips(duePool, st);
   document.getElementById("sourceFilterWrap").style.display = isCombined ? "" : "none";
   if (isCombined) renderSourceChips(items, st);
   renderGroups(items, st);
@@ -1021,7 +1026,7 @@ function renderStats(items) {
 }
 
 function renderOwnerChips(items, st) {
-  const owners = [...new Set(items.map((i) => i.owner).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const owners = [...new Set(items.map((i) => i.owner).filter(Boolean).concat(st.owner ? [st.owner] : []))].sort((a, b) => a.localeCompare(b));
   const el = document.getElementById("ownerChips");
   el.innerHTML = owners.map((o) => {
     const count = items.filter((i) => i.owner.toLowerCase() === o.toLowerCase()).length;
@@ -1041,7 +1046,7 @@ function renderDueChips(items, st) {
   const el = document.getElementById("dueChips");
   const cnt = (k) => items.filter((i) => i.dueStatus === k).length;
   const defs = [["overdue", "Over Due"], ["indue", "In Due"], ["closed", "Closed"]];
-  el.innerHTML = defs.map(([k, l]) =>
+  el.innerHTML = defs.filter(([k]) => cnt(k) > 0 || st.due === k).map(([k, l]) =>
     `<button type="button" class="chip ${st.due === k ? "active" : ""}" data-due="${k}">${l} <span class="count">${cnt(k)}</span></button>`
   ).join("");
   el.querySelectorAll("[data-due]").forEach((btn) => {
