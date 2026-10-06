@@ -1457,16 +1457,16 @@ function getAllBriefs() {
 // more than one circular-style sheet, only the Branchless one is read: a sheet
 // whose NAME says "Branchless", "Branchless Ops", "BB Ops", "BB Operations"...
 // If none of the sheets is named that way, nothing is hidden (all are read).
-const BRANCHLESS_SHEET_RE = /branchless|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
+const BRANCHLESS_SHEET_RE = /branch\s*less|branchles|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
 function circularSheetsToRead(session) {
   const names = Object.entries(session.tabs).filter(([, t]) => t.isCircular).map(([n]) => n);
   if (names.length <= 1) return new Set(names);
   const branchless = names.filter((n) => BRANCHLESS_SHEET_RE.test(n));
   return new Set(branchless.length ? branchless : names);
 }
-// "Relevant to Branchless" = the Relevant Department cell names Branchless /
+// "Relevant to Branchless" = a detail on the Branchless sheet, or one whose Relevant Department cell names Branchless /
 // Branchless Operations / BB Ops (a bare "DFS" or "Branch Operations" doesn't count).
-const BRANCHLESS_DEPT_RE = /branchless|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
+const BRANCHLESS_DEPT_RE = /branch\s*less|branchles|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
 // A status counts as "compliant" when it says Complied/Compliant, but not
 // "Non-Compliant", "Not Compliant" or "Partially Compliant".
 function statusSaysCompliant(v) {
@@ -1544,7 +1544,11 @@ function getCircularBriefsForSession(session) {
       // Needs Action: no management comment at all, and none of the row's
       // status values says compliant.
       const needsAction = !hasMgmt && !presentStatusValues.some(statusSaysCompliant);
-      const relevantToBranchless = BRANCHLESS_DEPT_RE.test(departmentRaw);
+      // Every detail on a sheet that is itself the Branchless sheet counts as
+      // relevant (its Relevant Department cell may be a typo, say "IT & ISRM
+      // (MMBL & DFS)" or "For Information Only"); on any other sheet the
+      // department cell has to name Branchless / BB Ops.
+      const relevantToBranchless = BRANCHLESS_SHEET_RE.test(sheetName) || BRANCHLESS_DEPT_RE.test(departmentRaw);
 
       const { preview } = truncateByLength(requirementFull);
       const id = `${session.fileName}::${sheetName}::${r}`;
