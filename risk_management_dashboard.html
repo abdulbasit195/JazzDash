@@ -295,6 +295,16 @@ h1{font-family:'Source Serif 4', serif; font-weight:600; font-size:clamp(22px,4v
 .badge.dept-4{color:var(--tag-4); border-color:var(--tag-4);}
 .badge.dept-5{color:var(--tag-5); border-color:var(--tag-5);}
 .badge.source-badge{color:var(--ink-600); border-color:var(--ink-600); background:var(--ink-700);}
+.del-btn{
+  flex:none; align-self:flex-start; display:inline-flex; align-items:center; gap:6px;
+  font-family:'IBM Plex Sans', sans-serif; font-size:12px; font-weight:600; line-height:1;
+  padding:6px 11px; border-radius:100px; cursor:pointer;
+  color:var(--red); background:transparent; border:1px solid var(--red-dim);
+  transition:background .12s ease, color .12s ease, border-color .12s ease;
+}
+.del-btn:hover, .del-btn:focus-visible{background:var(--red); border-color:var(--red); color:#fff; outline:none;}
+.del-btn svg{flex:none;}
+@media (max-width:560px){ .del-btn span{display:none;} .del-btn{padding:7px;} }
 .brief-chev{width:8px; height:8px; border-right:1.5px solid var(--text-lo); border-bottom:1.5px solid var(--text-lo); transform:rotate(45deg); flex:none; margin-top:5px; transition:transform .15s ease;}
 .brief-card[open] .brief-chev{transform:rotate(-135deg);}
 
@@ -440,11 +450,9 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
 // "All files in folder" shows every opened file's items together, each
 // tagged with its source file.
 //
-// ---- Read-only for now --------------------------------------------------------
-// This first version only DISPLAYS and FILTERS what's in the files — there's
-// no Add/Edit/Save here yet (unlike the Compliance Dashboard). The ExcelJS
-// workbook is still kept on each session, so wiring up editing later (the
-// same way the Compliance Dashboard does it) is a small add, not a rebuild.
+// ---- Editing: delete only, for now ---------------------------------------------
+// Everything is displayed and filtered read-only, except a Delete button on
+// each issue that removes its row from the source file too (see deleteItem()).
 //
 // ---- TO TEACH THIS DASHBOARD A NEW FILE KIND (KRIs, Risk Register, Incidents) --
 //   1. Write a detectXxxLayout(headerRow) function (see detectIssuesLayout
@@ -713,6 +721,7 @@ async function loadSessionsFromHandles(fileHandles) {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buf);
       const tabs = {};
+      const worksheets = {}; // sheetName -> live ExcelJS Worksheet, so a delete can remove the real row
       workbook.worksheets.forEach((ws) => {
         const sheetName = ws.name;
         const rows = worksheetToRows(ws);
@@ -724,8 +733,9 @@ async function loadSessionsFromHandles(fileHandles) {
         }
         if (!matched) return; // no recognized shape — e.g. a pivot/summary tab, or a file type not taught yet
         tabs[sheetName] = { rows, kind: matched.kind, layout: matched.layout };
+        worksheets[sheetName] = ws;
       });
-      fileSessions[f.name] = { fileName: f.name, fileHandle: f.handle, workbook, tabs };
+      fileSessions[f.name] = { fileName: f.name, fileHandle: f.handle, workbook, worksheets, tabs };
     } catch (err) {
       console.warn(`Skipping "${f.name}":`, err);
     }
@@ -976,7 +986,7 @@ function renderCurrentView() {
     ? `${totalCount} item(s) across ${Object.keys(fileSessions).length} file(s)`
     : `${totalCount} item(s) in this file`;
   document.getElementById("footerNote").textContent =
-    `Risk Management Dashboard · read-only for now · nothing is uploaded, everything runs in your browser`;
+    `Risk Management Dashboard · deleting an issue also deletes its row in the Excel file · nothing is uploaded, everything runs in your browser`;
 
   renderStats(items);
   renderOwnerChips(items, st);
@@ -1139,6 +1149,11 @@ function renderIssueCard(item, i, ctx) {
         <div class="brief-preview">${esc(item.title)}</div>
         <div class="badges">${badges.join("")}</div>
       </div>
+      <button type="button" class="del-btn" title="Delete this issue (also removes the row from the Excel file)" aria-label="Delete this issue"
+        data-del-file="${esc(item.sourceFile)}" data-del-sheet="${esc(item.sourceSheet)}" data-del-row="${item.rowIndex}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
+        <span>Delete</span>
+      </button>
       <span class="chev brief-chev"></span>
     </summary>
     <div class="brief-detail">
@@ -1155,6 +1170,15 @@ function wireGroupInteractions(container, st) {
     det.addEventListener("toggle", () => {
       const k = det.getAttribute("data-tab-group");
       if (det.open) st.openTabs.add(k); else st.openTabs.delete(k);
+    });
+  });
+  container.querySelectorAll(".del-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      // The button lives inside <summary>; without this the click would also
+      // expand/collapse the card.
+      e.preventDefault();
+      e.stopPropagation();
+      deleteItem(btn.getAttribute("data-del-file"), btn.getAttribute("data-del-sheet"), Number(btn.getAttribute("data-del-row")));
     });
   });
   container.querySelectorAll(".brief-card").forEach((det) => {
@@ -1182,6 +1206,66 @@ document.getElementById("toggleAllBtn").addEventListener("click", (e) => {
   else { st.openTabs.clear(); e.target.textContent = "Expand all"; }
   renderCurrentView();
 });
+
+// ------------------------------------------------------------------ writing --
+// Delete is the only edit this dashboard has so far. It removes the row from
+// the live ExcelJS worksheet (shifting later rows up, like Excel's own
+// "Delete row") and writes the whole workbook back to the source file.
+
+function flashStatus(msg) { document.getElementById("fileStatus").textContent = msg; }
+
+function downloadCopy(wbout, downloadName, customMessage) {
+  const blob = new Blob([wbout], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = downloadName || "updated.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  flashStatus(customMessage || `Downloaded an updated copy of "${downloadName}" — replace the original with it.`);
+}
+
+async function saveSession(session) {
+  const wbout = await session.workbook.xlsx.writeBuffer();
+  if (session.fileHandle) {
+    try {
+      const perm = await session.fileHandle.queryPermission({ mode: "readwrite" });
+      let granted = perm === "granted";
+      if (!granted) granted = (await session.fileHandle.requestPermission({ mode: "readwrite" })) === "granted";
+      if (!granted) throw new Error("permission not granted");
+      const writable = await session.fileHandle.createWritable();
+      await writable.write(wbout);
+      await writable.close();
+      flashStatus(`Saved to "${session.fileName}" — ${new Date().toLocaleTimeString()}`);
+      return true;
+    } catch (err) {
+      downloadCopy(wbout, session.fileName, `Couldn't save directly to "${session.fileName}" (${err.message}) — downloaded an updated copy instead.`);
+      return false;
+    }
+  }
+  downloadCopy(wbout, session.fileName);
+  return false;
+}
+
+async function deleteItem(sourceFile, sourceSheet, rowIndex) {
+  const session = fileSessions[sourceFile];
+  if (!session) return;
+  const item = getItemsForSession(session).find((i) => i.sourceSheet === sourceSheet && i.rowIndex === rowIndex);
+  if (!item) return;
+  if (!confirm(`Delete this issue?\n\n${item.title}\n\nThe row will also be removed from "${sourceFile}". This cannot be undone.`)) return;
+  const tab = session.tabs[sourceSheet];
+  const ws = session.worksheets[sourceSheet];
+  tab.rows.splice(rowIndex, 1);
+  if (ws) ws.spliceRows(rowIndex + 1, 1); // rows[] is 0-based, the worksheet is 1-based
+  // Row numbers after the deleted one just shifted, and card ids are built
+  // from row numbers — forget which cards were open rather than reopen the wrong ones.
+  state.openItems.clear(); combinedState.openItems.clear();
+  await saveSession(session);
+  renderSwitchList();
+  renderCurrentView();
+}
 
 // ------------------------------------------------------- remembering the folder --
 
@@ -1322,7 +1406,7 @@ async function jazzOpen(ask) {
   }
   await jazzLoadIntoDashboard(files);
   const where = jazzRecord.kind === "folder" ? `folder "${jazzRecord.label}"` : "the files you picked";
-  const saveNote = " · this dashboard is read-only for now";
+  const saveNote = jazzRecord.kind === "blobs" ? " · this browser can't save in place, so deleting downloads an updated copy" : " · deleting an issue removes its row from the file";
   document.getElementById("fileStatus").textContent =
     `Opened ${files.length} file(s) from ${where}${pending ? ` (${pending} waiting to reconnect)` : ""}${saveNote}`;
 }
