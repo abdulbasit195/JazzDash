@@ -444,8 +444,6 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
         <div class="filter-label">FILTER BY STATUS</div>
         <div class="chip-row" id="statusChips"></div>
 
-        <div class="filter-label">FILTER BY IA VALIDATION</div>
-        <div class="chip-row" id="iavChips"></div>
 
         <!-- Only shown once at least one brief has a saved Sub Team tag. -->
         <div id="subteamFilterWrap" style="display:none;">
@@ -524,10 +522,6 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
         <div class="field">
           <label for="f_status">Status — replaces the entire status cell with this exact text</label>
           <input type="text" id="f_status" placeholder="e.g. Open">
-        </div>
-        <div class="field">
-          <label for="f_iav">Internal Audit Validation</label>
-          <textarea id="f_iav"></textarea>
         </div>
         <div class="field">
           <label for="f_comment">Comment</label>
@@ -1626,7 +1620,6 @@ function writeBriefFields(session, sheetName, rowIndex, data) {
   if (tab.cols.brief >= 0) setField(tab.cols.brief, data.brief);
   if (tab.cols.department >= 0) setField(tab.cols.department, data.department);
   if (tab.cols.status >= 0) setField(tab.cols.status, data.status);
-  if (tab.cols.iaValidation >= 0) setField(tab.cols.iaValidation, data.iaValidation);
   if (tab.cols.comment >= 0) setField(tab.cols.comment, data.comment);
 }
 
@@ -1894,8 +1887,6 @@ function matchesFilters(b, st) {
   if (st.tab && b.sourceSheet !== st.tab) return false;
   if (st.department && !b.departments.some((d) => d.toLowerCase() === st.department.toLowerCase())) return false;
   if (st.status && b.statusBadge !== st.status) return false;
-  if (st.iav === "yes" && !b.hasIAValidation) return false;
-  if (st.iav === "no" && b.hasIAValidation) return false;
   if (st.subteam && (b.subTeam || "").toLowerCase() !== st.subteam.toLowerCase()) return false;
   if (st.source && b.sourceFile !== st.source) return false;
   if (st.query) {
@@ -1936,7 +1927,6 @@ function renderCurrentView() {
   renderTabChips(briefs, st);
   renderDeptChips(briefs, st);
   renderStatusChips(briefs, st);
-  renderIavChips(briefs, st);
   renderSubteamChips(briefs, st);
   document.getElementById("sourceFilterWrap").style.display = isCombined ? "" : "none";
   if (isCombined) renderSourceChips(briefs, st);
@@ -1949,7 +1939,7 @@ function renderCurrentView() {
   renderCircNeedsActionChips(circularBriefs, st);
   renderCircularGroups(circularBriefs, st);
 
-  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circDept || st.circMgmt || st.circCompliant || st.circNeedsAction;
+  const hasFilter = st.tab || st.department || st.status || st.subteam || st.source || st.query || st.circDept || st.circMgmt || st.circCompliant || st.circNeedsAction;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
   document.getElementById("searchBox").value = st.query;
 }
@@ -1958,12 +1948,10 @@ function renderStats(briefs) {
   const total = briefs.length;
   const open = briefs.filter((b) => b.statusBadge === "Open" || b.statusBadge === "Mixed").length;
   const closed = briefs.filter((b) => b.statusBadge === "Closed").length;
-  const withIav = briefs.filter((b) => b.hasIAValidation).length;
   const items = [
     { n: total, l: "Total briefs" },
     { n: open, l: "Open / Mixed", cls: "accent-open" },
     { n: closed, l: "Closed", cls: "accent-closed" },
-    { n: withIav, l: "Have IA Validation", cls: "accent-iav" },
   ];
   document.getElementById("statRow").innerHTML = items.map(
     (s) => `<div class="stat ${s.cls || ""}"><span class="n">${s.n}</span><span class="l">${esc(s.l)}</span></div>`
@@ -2028,22 +2016,6 @@ function renderStatusChips(briefs, st) {
   el.querySelectorAll("[data-status]").forEach((btn) => {
     btn.addEventListener("click", () => {
       st.status = st.status === btn.getAttribute("data-status") ? null : btn.getAttribute("data-status");
-      renderCurrentView();
-    });
-  });
-}
-function renderIavChips(briefs, st) {
-  const el = document.getElementById("iavChips");
-  const yesCount = briefs.filter((b) => b.hasIAValidation).length;
-  const noCount = briefs.length - yesCount;
-  el.innerHTML = `
-    <button type="button" class="chip ${st.iav === "yes" ? "active" : ""}" data-iav="yes">Has IA Validation <span class="count">${yesCount}</span></button>
-    <button type="button" class="chip ${st.iav === "no" ? "active" : ""}" data-iav="no">No IA Validation <span class="count">${noCount}</span></button>
-  `;
-  el.querySelectorAll("[data-iav]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const v = btn.getAttribute("data-iav");
-      st.iav = st.iav === v ? null : v;
       renderCurrentView();
     });
   });
@@ -2127,7 +2099,6 @@ function renderGroups(allBriefsForView, st) {
               <div class="brief-preview">${esc(b.briefPreview)}</div>
               <div class="badges">
                 ${b.statusBadge ? `<span class="badge status-${b.statusBadge}">${esc(b.statusBadge)}</span>` : ""}
-                ${b.hasIAValidation ? `<span class="badge iav-badge">IA Validation</span>` : ""}
                 ${b.departments.map((d) => `<span class="badge dept-${deptColorIndex(d, depts)}">${esc(d)}</span>`).join("")}
                 ${b.subTeam ? `<span class="badge subteam-badge">Sub Team: ${esc(b.subTeam)}</span>` : ""}
                 ${viewMode === "combined" ? `<span class="badge source-badge">${esc(b.sourceFile)}</span>` : ""}
@@ -2149,7 +2120,6 @@ function renderGroups(allBriefsForView, st) {
             </div>` : ""}
             <div class="field-grid">
               <div class="field-box ${b.statusRaw ? "on" : ""}"><span class="k">Status</span><span class="v">${esc(b.statusRaw) || "—"}</span></div>
-              <div class="field-box ${b.hasIAValidation ? "on" : ""}"><span class="k">IA Validation</span><span class="v">${esc(b.iaValidationRaw) || "—"}</span></div>
             </div>
             <div class="field-box on" style="margin-bottom:12px;">
               <span class="k">Sub Team log (saved locally — not written to the Excel file)</span>
@@ -2495,7 +2465,7 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 });
 document.getElementById("clearFiltersBtn").addEventListener("click", () => {
   const st = activeState();
-  st.tab = null; st.department = null; st.status = null; st.iav = null; st.subteam = null; st.source = null; st.query = "";
+  st.tab = null; st.department = null; st.status = null; st.subteam = null; st.source = null; st.query = "";
   st.circDept = null; st.circMgmt = null; st.circCompliant = null; st.circNeedsAction = null;
   renderCurrentView();
 });
@@ -2533,7 +2503,6 @@ function openModal(ref) {
     document.getElementById("f_brief").value = brief ? brief.briefFull : "";
     document.getElementById("f_department").value = brief ? brief.departmentRaw : "";
     document.getElementById("f_status").value = brief ? brief.statusRaw : "";
-    document.getElementById("f_iav").value = brief ? brief.iaValidationRaw : "";
     document.getElementById("f_comment").value = brief ? brief.commentRaw : "";
   } else {
     document.getElementById("f_file_wrap").style.display = "";
@@ -2543,7 +2512,6 @@ function openModal(ref) {
     document.getElementById("f_brief").value = "";
     document.getElementById("f_department").value = "";
     document.getElementById("f_status").value = "";
-    document.getElementById("f_iav").value = "";
     document.getElementById("f_comment").value = "";
   }
 
@@ -2581,7 +2549,6 @@ document.getElementById("briefForm").addEventListener("submit", async (e) => {
     brief,
     department: document.getElementById("f_department").value.trim(),
     status: document.getElementById("f_status").value.trim(),
-    iaValidation: document.getElementById("f_iav").value.trim(),
     comment: document.getElementById("f_comment").value.trim(),
   };
 
