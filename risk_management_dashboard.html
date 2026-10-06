@@ -904,9 +904,8 @@ function getItemsForSession(session) {
         // closed  = Status is "Closed" (never counted as overdue / in due)
         // overdue = open, target date has passed
         // indue   = open, target date is today or still ahead
-        // none    = open, no target date
         const dueStatus = isClosed ? "closed"
-          : !targetInfo ? "none"
+          : !targetInfo ? "overdue"   // blank Target Completion Date counts as over due
           : targetInfo.state === "overdue" ? "overdue" : "indue";
 
         items.push({
@@ -1147,6 +1146,9 @@ function renderIssueCard(item, i, ctx) {
   }
   if (item.status) {
     badges.unshift(`<span class="badge ${item.isClosed ? "status-Closed" : "status-tag"}">${esc(item.status)}</span>`);
+  }
+  if (!item.targetDate && !item.isClosed) {
+    badges.push(`<span class="badge status-Open">No target date · over due</span>`);
   }
   if (item.owner) {
     badges.push(`<span class="badge dept-${ownerIdx >= 0 ? ownerIdx % 6 : 0}">${esc(item.owner)}</span>`);
