@@ -71,6 +71,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+/* Runs before first paint: if a sign-in is already cached for this tab, never
+   flash the Login / Open buttons — show the "checking" screen straight away. */
+try {
+  var __s = JSON.parse(sessionStorage.getItem("jazzdash_google_token") || "null");
+  if (__s && __s.token && Date.now() < __s.expiresAt - 60000) document.documentElement.classList.add("booting");
+} catch (e) {}
+</script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <!-- SheetJS — only used to peek at header rows so the right dashboard can be
      picked automatically. The dashboards do their own full reading. Loaded
@@ -270,6 +278,20 @@ body{
   padding:10px 0 2px;
   line-height:1.5;
 }
+
+/* ---------- "checking" screen ---------- */
+.loading-panel{ width:100%; display:none; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:34px 0 26px; text-align:center; }
+html.booting #homePanel{ display:none !important; }
+html.booting #loadingPanel{ display:flex !important; }
+.eq{ display:flex; align-items:flex-end; gap:7px; height:46px; }
+.eq span{ width:8px; height:100%; border-radius:4px; background:var(--red); box-shadow:0 0 12px var(--red-glow); transform-origin:bottom; transform:scaleY(.25); animation:eqBounce 1.1s ease-in-out infinite; }
+.eq span:nth-child(2){ animation-delay:.12s; } .eq span:nth-child(3){ animation-delay:.24s; }
+.eq span:nth-child(4){ animation-delay:.36s; } .eq span:nth-child(5){ animation-delay:.48s; }
+@keyframes eqBounce{ 0%,100%{ transform:scaleY(.25); opacity:.55; } 50%{ transform:scaleY(1); opacity:1; } }
+.loading-text{ font-size:14px; line-height:1.5; color:var(--text-hi); letter-spacing:.2px; }
+.loading-text .dots::after{ content:""; animation:dotsCycle 1.5s steps(4,end) infinite; }
+@keyframes dotsCycle{ 0%{content:"";} 25%{content:".";} 50%{content:"..";} 75%{content:"...";} }
+@media (prefers-reduced-motion:reduce){ .eq span{ animation:none; transform:scaleY(.6); } }
 </style>
 </head>
 <body>
@@ -284,6 +306,12 @@ body{
     <button type="button" class="btn btn-ghost" id="openFileBtn">Open file locally</button>
     <div class="divider">OR</div>
     <button type="button" class="btn btn-primary" id="loginBtn">Login to Jazz Dash</button>
+  </div>
+
+  <!-- ===================== CHECKING SCREEN (shown instead of the buttons while shared dashboards are looked up) ===================== -->
+  <div id="loadingPanel" class="loading-panel" data-display="flex" style="display:none;" role="status" aria-live="polite">
+    <div class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="loading-text">Checking which dashboards are shared with you<span class="dots"></span></div>
   </div>
 
   <!-- ===================== "WHICH DASHBOARD" PANEL (only when detection isn't sure) ===================== -->
@@ -381,10 +409,12 @@ const MAX_DRIVE_FILES = 25;
 const homePanel = document.getElementById("homePanel");
 const pickerPanel = document.getElementById("pickerPanel");
 const dashPanel = document.getElementById("dashPanel");
+const loadingPanel = document.getElementById("loadingPanel");
 const statusLine = document.getElementById("statusLine");
 
 function showPanel(panel) {
-  [homePanel, pickerPanel, dashPanel].forEach((p) => { p.style.display = p === panel ? "" : "none"; });
+  document.documentElement.classList.remove("booting");
+  [homePanel, pickerPanel, dashPanel, loadingPanel].forEach((p) => { p.style.display = p === panel ? (p.dataset.display || "") : "none"; });
 }
 function setStatus(msg, isError) {
   statusLine.textContent = msg || "";
@@ -649,8 +679,10 @@ function initGoogle() {
     scope: "https://www.googleapis.com/auth/drive " +
            "https://www.googleapis.com/auth/userinfo.email " +
            "https://www.googleapis.com/auth/userinfo.profile",
+    error_callback: () => { setHomeBusy(false); setStatus("Sign-in was cancelled or blocked.", true); },
     callback: async (resp) => {
       if (resp.error) {
+        setHomeBusy(false);
         setStatus("Sign-in was cancelled or blocked.", true);
         return;
       }
@@ -681,6 +713,7 @@ function readCachedToken() {
 document.getElementById("loginBtn").addEventListener("click", () => {
   if (!tokenClient) { setStatus("Google Sign-In is still loading — try again in a moment.", true); return; }
   setStatus("Opening Google sign-in…");
+  setHomeBusy(true); // stop repeat clicks while the Google window is open
   tokenClient.requestAccessToken({ prompt: "" });
 });
 
@@ -695,37 +728,21 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-async function afterSignIn() {
-  setStatus("Checking your account…");
+// What the last successful check found, kept for this tab so coming back from
+// a dashboard shows the buttons instantly (and re-checks quietly behind them).
+const JAZZDASH_ACCESS_KEY = "jazzdash_access_cache";
+function readAccessCache() {
   try {
-    const userResp = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!userResp.ok) throw new Error("Could not read your Google profile.");
-    currentUser = await userResp.json();
-  } catch (err) {
-    try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); } catch (e) {}
-    accessToken = null;
-    setStatus(err.message || "Sign-in failed.", true);
-    return;
-  }
+    const c = JSON.parse(sessionStorage.getItem(JAZZDASH_ACCESS_KEY) || "null");
+    return c && c.token === accessToken && c.user && Array.isArray(c.ids) ? c : null;
+  } catch (e) { return null; }
+}
+function writeAccessCache(user, ids, folderIdFor) {
+  try { sessionStorage.setItem(JAZZDASH_ACCESS_KEY, JSON.stringify({ token: accessToken, user, ids, folderIdFor })); } catch (e) {}
+}
 
-  renderUserChip();
-  setStatus("Checking which dashboards are shared with you…");
-
-  // dashboard id -> the Drive folder id that gated it, so the click handler
-  // below knows exactly which folder to pull files from.
-  const accessible = [];
-  const folderIdFor = {};
-  for (const d of DASHBOARDS) {
-    try {
-      const folder = await findDriveFolder(d.driveFolderName);
-      if (folder) { accessible.push(d); folderIdFor[d.id] = folder.id; }
-    } catch (err) {
-      console.warn(`Could not check Drive access for "${d.driveFolderName}":`, err);
-    }
-  }
-
+function renderDashButtons(ids, folderIdFor) {
+  const accessible = DASHBOARDS.filter((d) => ids.includes(d.id));
   const dashButtons = document.getElementById("dashButtons");
   const emptyNote = document.getElementById("dashEmptyNote");
   if (accessible.length) {
@@ -734,6 +751,7 @@ async function afterSignIn() {
     ).join("");
     dashButtons.querySelectorAll("[data-id]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        dashButtons.querySelectorAll("button").forEach((b) => { b.disabled = true; }); // one click is enough
         const d = DASHBOARDS.find((x) => x.id === btn.getAttribute("data-id"));
         openDashboardFromDrive(d, folderIdFor[d.id]);
       });
@@ -743,8 +761,61 @@ async function afterSignIn() {
     dashButtons.innerHTML = "";
     emptyNote.style.display = "";
   }
+}
 
+// Reads the profile and checks every dashboard's Drive folder AT THE SAME
+// TIME (they used to run one after another).
+async function checkAccess() {
+  const profileP = fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }).then((r) => { if (!r.ok) throw new Error("Could not read your Google profile."); return r.json(); });
+  const foldersP = Promise.all(DASHBOARDS.map(async (d) => {
+    try { return [d, await findDriveFolder(d.driveFolderName)]; }
+    catch (err) { console.warn(`Could not check Drive access for "${d.driveFolderName}":`, err); return [d, null]; }
+  }));
+  const [user, results] = await Promise.all([profileP, foldersP]);
+  const ids = [], folderIdFor = {};
+  results.forEach(([d, folder]) => { if (folder) { ids.push(d.id); folderIdFor[d.id] = folder.id; } });
+  return { user, ids, folderIdFor };
+}
+
+async function afterSignIn() {
+  const cached = readAccessCache();
+  if (cached) {
+    // Instant: show what we found last time, then refresh quietly.
+    currentUser = cached.user;
+    renderUserChip();
+    renderDashButtons(cached.ids, cached.folderIdFor);
+    setStatus("");
+    showPanel(dashPanel);
+    try {
+      const fresh = await checkAccess();
+      if (JSON.stringify([fresh.ids, fresh.folderIdFor]) !== JSON.stringify([cached.ids, cached.folderIdFor])) {
+        renderDashButtons(fresh.ids, fresh.folderIdFor);
+      }
+      writeAccessCache(fresh.user, fresh.ids, fresh.folderIdFor);
+    } catch (err) { console.warn("Background re-check failed; keeping the last result:", err); }
+    return;
+  }
+
+  // First check for this sign-in: one calm "checking" screen, no buttons.
   setStatus("");
+  showPanel(loadingPanel);
+  let result;
+  try {
+    result = await checkAccess();
+  } catch (err) {
+    try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); } catch (e) {}
+    accessToken = null;
+    setHomeBusy(false);
+    showPanel(homePanel);
+    setStatus(err.message || "Sign-in failed.", true);
+    return;
+  }
+  currentUser = result.user;
+  renderUserChip();
+  renderDashButtons(result.ids, result.folderIdFor);
+  writeAccessCache(result.user, result.ids, result.folderIdFor);
   showPanel(dashPanel);
 }
 
@@ -824,9 +895,10 @@ function signOut() {
   if (accessToken && typeof google !== "undefined" && google.accounts && google.accounts.oauth2.revoke) {
     google.accounts.oauth2.revoke(accessToken, () => {});
   }
-  try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); } catch (e) {}
+  try { sessionStorage.removeItem(JAZZDASH_TOKEN_KEY); sessionStorage.removeItem(JAZZDASH_ACCESS_KEY); } catch (e) {}
   accessToken = null;
   currentUser = null;
+  setHomeBusy(false);
   setStatus("");
   showPanel(homePanel);
 }
