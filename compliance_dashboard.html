@@ -938,7 +938,7 @@ function parseDepartments(raw) {
 
 function deriveStatusBadge(raw) {
   const t = normalizeHeader(raw);
-  if (!t) return "";
+  if (!t) return "Open"; // a blank status (nothing in the latest status column) counts as Open
   const hasOpen = /\bopen\b/.test(t);
   const hasClosed = /\bclosed\b/.test(t);
   if (hasOpen && hasClosed) return "Mixed";
