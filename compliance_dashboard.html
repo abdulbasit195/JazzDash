@@ -1091,13 +1091,19 @@ function createDriveFileHandle(fileId, name, modifiedTime) {
     // just the modifiedTime field) before deciding whether the cached copy
     // is still good or a real download is needed.
     async getFile() {
+      const cached = await driveCacheGet(fileId).catch(() => undefined);
+      // Fast path: the Jazz Dash home page listed this file moments ago and told us its
+      // modifiedTime; if our saved copy matches it, skip the extra "has it changed?"
+      // round trip to Drive entirely.
+      if (cached && modifiedTime && cached.modifiedTime === modifiedTime) {
+        return new File([cached.blob], name, { type: cached.blob.type });
+      }
       const metaRes = await driveApiFetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`
       );
       const meta = await metaRes.json();
       const currentModifiedTime = meta.modifiedTime;
 
-      const cached = await driveCacheGet(fileId).catch(() => undefined);
       if (cached && cached.modifiedTime === currentModifiedTime) {
         return new File([cached.blob], name, { type: cached.blob.type });
       }
@@ -1193,7 +1199,10 @@ async function loadSessionsFromHandles(fileHandles) {
   document.getElementById("fileStatus").textContent = `Reading ${fileHandles.length} file(s)…`;
   fileSessions = {};
 
-  for (const f of fileHandles) {
+  // Files are downloaded and parsed side by side (not one after another), and the
+  // status line counts them off as each one finishes.
+  let doneCount = 0;
+  const results = await Promise.all(fileHandles.map(async (f) => {
     try {
       const file = await f.handle.getFile();
       const buf = await file.arrayBuffer();
@@ -1229,11 +1238,16 @@ async function loadSessionsFromHandles(fileHandles) {
         tabs[sheetName] = { rows, circularLayout, isCircular: true, toolAddedCommentHeaders: new Set() };
         worksheets[sheetName] = ws;
       });
-      fileSessions[f.name] = { fileName: f.name, fileHandle: f.handle, workbook, worksheets, tabs };
+      doneCount++;
+      document.getElementById("fileStatus").textContent = `Reading files… ${doneCount} of ${fileHandles.length} ready`;
+      return { name: f.name, session: { fileName: f.name, fileHandle: f.handle, workbook, worksheets, tabs } };
     } catch (err) {
       console.warn(`Skipping "${f.name}":`, err);
+      doneCount++;
+      return null;
     }
-  }
+  }));
+  results.forEach((r) => { if (r) fileSessions[r.name] = r.session; }); // keeps the original file order
 
   const names = Object.keys(fileSessions);
   document.getElementById("fileStatus").textContent = names.length
