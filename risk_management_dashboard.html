@@ -210,6 +210,8 @@ h1{font-family:'Source Serif 4', serif; font-weight:600; font-size:clamp(22px,4v
 .stat:last-child{border-right:none;}
 .stat.accent-open{border-left:3px solid var(--status-open);}
 .stat.accent-open .n{color:var(--status-open);}
+.stat.accent-indue{border-left:3px solid var(--amber,#d9a21b);}
+.stat.accent-indue .n{color:var(--amber,#d9a21b);}
 .stat.accent-closed{border-left:3px solid var(--status-closed);}
 .stat.accent-closed .n{color:var(--status-closed);}
 .stat .n{font-family:'Source Serif 4', serif; font-size:26px; font-weight:600; display:block; line-height:1.1;}
@@ -286,6 +288,8 @@ h1{font-family:'Source Serif 4', serif; font-weight:600; font-size:clamp(22px,4v
 .badges{display:flex; flex-wrap:wrap; gap:6px;}
 .badge{font-family:'IBM Plex Mono', monospace; font-size:10.5px; padding:2px 8px; border-radius:100px; border:1px solid transparent;}
 .badge.status-Open{color:var(--status-open); border-color:var(--status-open);}
+.badge.status-tag{color:var(--ink-600); border-color:var(--ink-600); font-weight:600;}
+.badge.status-Indue{color:var(--amber,#d9a21b); border-color:var(--amber,#d9a21b);}
 .badge.status-Closed{color:var(--status-closed); border-color:var(--status-closed);}
 .badge.discovery-badge{color:var(--ink-600); border-color:var(--ink-600);}
 .badge.dept-0{color:var(--tag-0); border-color:var(--tag-0);}
@@ -387,7 +391,7 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
       <div class="filter-label">FILTER BY OWNER</div>
       <div class="chip-row" id="ownerChips"></div>
 
-      <div class="filter-label">FILTER BY DUE STATUS</div>
+      <div class="filter-label">FILTER BY STATUS / DUE</div>
       <div class="chip-row" id="dueChips"></div>
 
       <!-- Only meaningful (and only shown) in "All files in folder" view. -->
@@ -504,9 +508,8 @@ const KIND_LABELS = {
 
 // "Issues" tabs — recognized by having ALL FIVE of these exact headers
 // (case-insensitive) somewhere in the header row. Only these five columns
-// are ever read; everything else in the file (Issue ID, Priority, Status,
-// Risk Officer, Action Plan, Department, ...) is deliberately ignored, per
-// how this dashboard was asked to be built.
+// (plus the optional "Status" column) are ever read; everything else in the
+// file is deliberately ignored, per how this dashboard was asked to be built.
 function detectIssuesLayout(headerRow) {
   const headers = (headerRow || []).map((h) => normalizeHeader(h));
   const find = (label) => headers.indexOf(normalizeHeader(label));
@@ -516,7 +519,7 @@ function detectIssuesLayout(headerRow) {
   const target = find("Target Completion Date");
   const owners = find("Issue Owners");
   if (title < 0 || description < 0 || discovery < 0 || target < 0 || owners < 0) return null;
-  return { title, description, discovery, target, owners };
+  return { title, description, discovery, target, owners, status: find("Status") };
 }
 
 // Tried in order against each tab's header row; the first one that matches
@@ -893,13 +896,18 @@ function getItemsForSession(session) {
         const discoveryDate = row[L.discovery] instanceof Date ? row[L.discovery] : null;
         const targetDate = row[L.target] instanceof Date ? row[L.target] : null;
         const owner = trimmed(row[L.owners]);
+        const status = L.status >= 0 ? trimmed(row[L.status]) : "";
+        const isClosed = status.toLowerCase() === "closed";
 
         const discoveryDaysPassed = discoveryDate ? daysBetween(startOfDay(discoveryDate), today) : null;
         const targetInfo = targetDate ? computeTargetInfo(targetDate, today) : null;
-        // "Due" = overdue (target date has passed). "Pending" = everything
-        // else — a future target date, a target date that's today, or no
-        // target date at all (nothing to be overdue against yet).
-        const dueStatus = (targetInfo && targetInfo.state === "overdue") ? "due" : "pending";
+        // closed  = Status is "Closed" (never counted as overdue / in due)
+        // overdue = open, target date has passed
+        // indue   = open, target date is today or still ahead
+        // none    = open, no target date
+        const dueStatus = isClosed ? "closed"
+          : !targetInfo ? "none"
+          : targetInfo.state === "overdue" ? "overdue" : "indue";
 
         items.push({
           id: `${session.fileName}::${sheetName}::${r}`,
@@ -911,7 +919,7 @@ function getItemsForSession(session) {
           descriptionFull,
           discoveryDate, discoveryDaysPassed,
           targetDate, targetInfo,
-          owner,
+          owner, status, isClosed,
           dueStatus,
         });
       }
@@ -946,8 +954,7 @@ let combinedState = freshFilterState();  // "All files" view's filters
 
 function matchesFilters(item, st) {
   if (st.owner && item.owner.toLowerCase() !== st.owner.toLowerCase()) return false;
-  if (st.due === "due" && item.dueStatus !== "due") return false;
-  if (st.due === "pending" && item.dueStatus !== "pending") return false;
+  if (st.due && item.dueStatus !== st.due) return false;
   if (st.source && item.sourceFile !== st.source) return false;
   if (st.query) {
     const q = st.query.toLowerCase();
@@ -1002,12 +1009,12 @@ function renderCurrentView() {
 
 function renderStats(items) {
   const total = items.length;
-  const due = items.filter((i) => i.dueStatus === "due").length;
-  const pending = total - due;
+  const cnt = (k) => items.filter((i) => i.dueStatus === k).length;
   const statItems = [
     { n: total, l: "Total Issues" },
-    { n: due, l: "Due", cls: "accent-open" },
-    { n: pending, l: "Pending", cls: "accent-closed" },
+    { n: cnt("closed"), l: "Closed", cls: "accent-closed" },
+    { n: cnt("overdue"), l: "Over Due", cls: "accent-open" },
+    { n: cnt("indue"), l: "In Due", cls: "accent-indue" },
   ];
   document.getElementById("statRow").innerHTML = statItems.map(
     (s) => `<div class="stat ${s.cls || ""}"><span class="n">${s.n}</span><span class="l">${esc(s.l)}</span></div>`
@@ -1033,12 +1040,11 @@ function renderOwnerChips(items, st) {
 
 function renderDueChips(items, st) {
   const el = document.getElementById("dueChips");
-  const dueCount = items.filter((i) => i.dueStatus === "due").length;
-  const pendingCount = items.length - dueCount;
-  el.innerHTML = `
-    <button type="button" class="chip ${st.due === "due" ? "active" : ""}" data-due="due">Due <span class="count">${dueCount}</span></button>
-    <button type="button" class="chip ${st.due === "pending" ? "active" : ""}" data-due="pending">Pending <span class="count">${pendingCount}</span></button>
-  `;
+  const cnt = (k) => items.filter((i) => i.dueStatus === k).length;
+  const defs = [["overdue", "Over Due"], ["indue", "In Due"], ["closed", "Closed"]];
+  el.innerHTML = defs.map(([k, l]) =>
+    `<button type="button" class="chip ${st.due === k ? "active" : ""}" data-due="${k}">${l} <span class="count">${cnt(k)}</span></button>`
+  ).join("");
   el.querySelectorAll("[data-due]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const v = btn.getAttribute("data-due");
@@ -1127,15 +1133,20 @@ function renderIssueCard(item, i, ctx) {
   // throughout).
   if (item.discoveryDate) {
     const agoText = item.discoveryDaysPassed >= 0 ? `${item.discoveryDaysPassed}d ago` : `in ${Math.abs(item.discoveryDaysPassed)}d`;
-    badges.push(`<span class="badge discovery-badge">Discovered ${esc(formatDateShort(item.discoveryDate))} · ${agoText}</span>`);
+    const sinceText = item.discoveryDaysPassed >= 0 ? `${item.discoveryDaysPassed}d since discovery` : `discovered in ${Math.abs(item.discoveryDaysPassed)}d`;
+    badges.push(`<span class="badge discovery-badge">Discovered ${esc(formatDateShort(item.discoveryDate))} · ${sinceText}</span>`);
   }
   // Target Completion Date tag — only shown if the file has one for this
   // row; overdue (red) vs. still ahead (muted) vs. due today.
   if (item.targetDate && item.targetInfo) {
     const t = item.targetInfo;
-    const text = t.state === "overdue" ? `${t.days}d overdue` : t.state === "today" ? "due today" : `${t.days}d left`;
-    const cls = t.state === "overdue" ? "status-Open" : "status-Closed";
-    badges.push(`<span class="badge ${cls}">Due ${esc(formatDateShort(item.targetDate))} · ${text}</span>`);
+    // Closed issues keep their date but aren't flagged overdue / in due.
+    const text = item.isClosed ? "" : t.state === "overdue" ? ` · ${t.days}d over due` : t.state === "today" ? " · due today" : ` · ${t.days}d left`;
+    const cls = item.isClosed ? "discovery-badge" : t.state === "overdue" ? "status-Open" : "status-Indue";
+    badges.push(`<span class="badge ${cls}">Target ${esc(formatDateShort(item.targetDate))}${text}</span>`);
+  }
+  if (item.status) {
+    badges.unshift(`<span class="badge ${item.isClosed ? "status-Closed" : "status-tag"}">${esc(item.status)}</span>`);
   }
   if (item.owner) {
     badges.push(`<span class="badge dept-${ownerIdx >= 0 ? ownerIdx % 6 : 0}">${esc(item.owner)}</span>`);
