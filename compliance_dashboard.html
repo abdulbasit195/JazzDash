@@ -488,8 +488,8 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
          no circular-format tabs — see renderCircularGroups() in app.js. -->
     <div class="stat-row" id="circularStatRow" style="display:none;"></div>
     <div class="filters" id="circularFilters" style="display:none;">
-      <div class="filter-label">FILTER BY MANAGEMENT COMMENTS</div>
-      <div class="chip-row" id="circMgmtChips"></div>
+      <div class="filter-label">FILTER BY RELEVANT DEPARTMENT</div>
+      <div class="chip-row" id="circDeptChips"></div>
       <div class="filter-label">FILTER BY ACTION NEEDED</div>
       <div class="chip-row" id="circNeedsActionChips"></div>
     </div>
@@ -1276,7 +1276,7 @@ async function loadSessionsFromHandles(fileHandles) {
 function freshFilterState() {
   return {
     tab: null, department: null, status: null, iav: null, subteam: null, source: null, query: "",
-    circMgmt: null, circCompliant: null, circNeedsAction: null, // circular files' own filters — see renderCircularGroups()
+    circDept: null, circMgmt: null, circCompliant: null, circNeedsAction: null, // circular files' own filters — see renderCircularGroups()
     openTabs: new Set(), openBriefs: new Set(),
   };
 }
@@ -1453,10 +1453,31 @@ function getAllBriefs() {
 // row, a row can have several departments, each with its own status and/or
 // comment value. Every value is read fresh from tab.rows at render time,
 // exactly like the standard path — rows stays the one source of truth.
+// Circular files can carry several sheets (e.g. one per team). When there is
+// more than one circular-style sheet, only the Branchless one is read: a sheet
+// whose NAME says "Branchless", "Branchless Ops", "BB Ops", "BB Operations"...
+// If none of the sheets is named that way, nothing is hidden (all are read).
+const BRANCHLESS_SHEET_RE = /branchless|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
+function circularSheetsToRead(session) {
+  const names = Object.entries(session.tabs).filter(([, t]) => t.isCircular).map(([n]) => n);
+  if (names.length <= 1) return new Set(names);
+  const branchless = names.filter((n) => BRANCHLESS_SHEET_RE.test(n));
+  return new Set(branchless.length ? branchless : names);
+}
+// "Relevant to Branchless" = the Relevant Department cell names Branchless /
+// Branchless Operations / BB Ops (a bare "DFS" or "Branch Operations" doesn't count).
+const BRANCHLESS_DEPT_RE = /branchless|\bbb[\s_.-]*op(?:s|erations?)?\b/i;
+// A status counts as "compliant" when it says Complied/Compliant, but not
+// "Non-Compliant", "Not Compliant" or "Partially Compliant".
+function statusSaysCompliant(v) {
+  return /\b(complied|compliant)\b/i.test(v) && !/\b(non[\s-]*|not\s+|partially\s+)(complied|compliant)\b/i.test(v);
+}
+
 function getCircularBriefsForSession(session) {
   const briefs = [];
+  const sheetsToRead = circularSheetsToRead(session);
   Object.entries(session.tabs).forEach(([sheetName, tab]) => {
-    if (!tab.isCircular) return;
+    if (!tab.isCircular || !sheetsToRead.has(sheetName)) return;
     const layout = tab.circularLayout;
     for (let r = 1; r < tab.rows.length; r++) {
       const row = tab.rows[r];
@@ -1513,7 +1534,17 @@ function getCircularBriefsForSession(session) {
       // "please provide evidence" case, worth flagging even on a row
       // Branchless already marked compliant.
       const complianceGroups = [...groupsMap.values()].filter((g) => g.department.toLowerCase().includes("complian"));
-      const needsAction = complianceGroups.some((g) => g.commentFields.length > 0);
+      const needsActionOld = complianceGroups.some((g) => g.commentFields.length > 0); // (no longer used for the stat/filter)
+
+      // Management comments can sit in one dedicated column OR in per-team
+      // columns such as "Management Comments - DFS" — any of them counts.
+      const mgmtFieldValues = [...groupsMap.values(), { statusFields: [], commentFields: standaloneFields.filter((f) => f.kind === "comment") }]
+        .flatMap((g) => g.commentFields).filter((f) => /management/i.test(f.header)).map((f) => f.value);
+      const hasMgmt = !!managementComments || mgmtFieldValues.length > 0;
+      // Needs Action: no management comment at all, and none of the row's
+      // status values says compliant.
+      const needsAction = !hasMgmt && !presentStatusValues.some(statusSaysCompliant);
+      const relevantToBranchless = BRANCHLESS_DEPT_RE.test(departmentRaw);
 
       const { preview } = truncateByLength(requirementFull);
       const id = `${session.fileName}::${sheetName}::${r}`;
@@ -1529,7 +1560,8 @@ function getCircularBriefsForSession(session) {
         groups: [...groupsMap.values()],
         standaloneFields,
         managementComments,
-        hasManagementComments: !!managementComments,
+        hasManagementComments: hasMgmt,
+        relevantToBranchless,
         allCompliant,
         compliantByBranchless,
         needsAction,
@@ -1909,11 +1941,11 @@ function renderCurrentView() {
   renderCircularStats(circularBriefs);
   const circularFiltersEl = document.getElementById("circularFilters");
   if (circularFiltersEl) circularFiltersEl.style.display = circularBriefs.length > 0 ? "" : "none";
-  renderCircMgmtChips(circularBriefs, st);
+  renderCircDeptChips(circularBriefs, st);
   renderCircNeedsActionChips(circularBriefs, st);
   renderCircularGroups(circularBriefs, st);
 
-  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circMgmt || st.circCompliant || st.circNeedsAction;
+  const hasFilter = st.tab || st.department || st.status || st.iav || st.subteam || st.source || st.query || st.circDept || st.circMgmt || st.circCompliant || st.circNeedsAction;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
   document.getElementById("searchBox").value = st.query;
 }
@@ -2241,8 +2273,7 @@ function matchesCircularQuery(b, st) {
 // the free-text query match (above) with those two.
 function matchesCircularFilters(b, st) {
   if (!matchesCircularQuery(b, st)) return false;
-  if (st.circMgmt === "yes" && !b.hasManagementComments) return false;
-  if (st.circMgmt === "no" && b.hasManagementComments) return false;
+  if (st.circDept && !b.departments.some((d) => d.toLowerCase() === st.circDept.toLowerCase())) return false;
   if (st.circCompliant === "yes" && !b.compliantByBranchless) return false;
   if (st.circCompliant === "no" && b.compliantByBranchless) return false;
   if (st.circNeedsAction === "yes" && !b.needsAction) return false;
@@ -2262,14 +2293,10 @@ function renderCircularStats(circularBriefs) {
   if (!row) return;
   if (circularBriefs.length === 0) { row.style.display = "none"; row.innerHTML = ""; return; }
   const total = circularBriefs.length;
-  const withMgmt = circularBriefs.filter((b) => b.hasManagementComments).length;
-  const compliantByBranchless = circularBriefs.filter((b) => b.compliantByBranchless).length;
-  const needsAction = circularBriefs.filter((b) => b.needsAction).length;
+  const relevant = circularBriefs.filter((b) => b.relevantToBranchless).length;
   const items = [
     { n: total, l: "Total Requirement Details" },
-    { n: withMgmt, l: "Has Management Comments", cls: "accent-iav" },
-    { n: compliantByBranchless, l: "Compliant by Branchless", cls: "accent-closed" },
-    { n: needsAction, l: "Needs Action", cls: "accent-open" },
+    { n: relevant, l: "Relevant to Branchless", cls: "accent-iav" },
   ];
   row.style.display = "";
   row.innerHTML = items.map(
@@ -2277,19 +2304,23 @@ function renderCircularStats(circularBriefs) {
   ).join("");
 }
 
-function renderCircMgmtChips(circularBriefs, st) {
-  const el = document.getElementById("circMgmtChips");
+function renderCircDeptChips(circularBriefs, st) {
+  const el = document.getElementById("circDeptChips");
   if (!el) return;
-  const yesCount = circularBriefs.filter((b) => b.hasManagementComments).length;
-  const noCount = circularBriefs.length - yesCount;
-  el.innerHTML = `
-    <button type="button" class="chip ${st.circMgmt === "yes" ? "active" : ""}" data-circmgmt="yes">Has Management Comments <span class="count">${yesCount}</span></button>
-    <button type="button" class="chip ${st.circMgmt === "no" ? "active" : ""}" data-circmgmt="no">No Management Comments <span class="count">${noCount}</span></button>
-  `;
-  el.querySelectorAll("[data-circmgmt]").forEach((btn) => {
+  const counts = new Map(); // lower-case key -> { label, count }
+  circularBriefs.forEach((b) => b.departments.forEach((d) => {
+    const k = d.toLowerCase();
+    if (!counts.has(k)) counts.set(k, { label: d, count: 0 });
+    counts.get(k).count++;
+  }));
+  const list = [...counts.values()].sort((a, b) => a.label.localeCompare(b.label));
+  el.innerHTML = list.map((d) =>
+    `<button type="button" class="chip ${st.circDept && st.circDept.toLowerCase() === d.label.toLowerCase() ? "active" : ""}" data-circdept="${esc(d.label)}">${esc(d.label)} <span class="count">${d.count}</span></button>`
+  ).join("");
+  el.querySelectorAll("[data-circdept]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const v = btn.getAttribute("data-circmgmt");
-      st.circMgmt = st.circMgmt === v ? null : v;
+      const v = btn.getAttribute("data-circdept");
+      st.circDept = (st.circDept && st.circDept.toLowerCase() === v.toLowerCase()) ? null : v;
       renderCurrentView();
     });
   });
@@ -2461,7 +2492,7 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 document.getElementById("clearFiltersBtn").addEventListener("click", () => {
   const st = activeState();
   st.tab = null; st.department = null; st.status = null; st.iav = null; st.subteam = null; st.source = null; st.query = "";
-  st.circMgmt = null; st.circCompliant = null; st.circNeedsAction = null;
+  st.circDept = null; st.circMgmt = null; st.circCompliant = null; st.circNeedsAction = null;
   renderCurrentView();
 });
 document.getElementById("toggleAllBtn").addEventListener("click", (e) => {
