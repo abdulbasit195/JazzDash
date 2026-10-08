@@ -498,6 +498,34 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
 }
 @media (prefers-reduced-motion:reduce){ .jd-shell *{ animation-duration:.001s !important; animation-delay:0s !important; transition-duration:.001s !important; } }
 
+/* ---- summary file picker ---- */
+.jd-picker{ position:relative; z-index:30; display:flex; align-items:center; gap:12px; margin:0 0 18px; flex-wrap:wrap; animation:jdFadeUp .45s both; }
+.jd-pk-lab{ font:600 11.5px 'IBM Plex Sans',sans-serif; letter-spacing:.1em; text-transform:uppercase; color:var(--text-lo); }
+.jd-pk{ position:relative; min-width:0; max-width:100%; }
+.jd-pk-btn{ display:flex; align-items:center; gap:10px; max-width:min(560px,86vw); background:var(--ink-700); color:var(--text-hi); border:1px solid var(--line); border-radius:100px; padding:9px 14px 9px 14px; font:600 13.5px 'IBM Plex Sans',sans-serif; cursor:pointer; transition:border-color .2s, box-shadow .2s, transform .2s; }
+.jd-pk-btn:hover{ border-color:var(--red); box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 18%,transparent); transform:translateY(-1px); }
+.jd-pk-btn .fi{ color:var(--red); flex:none; } .jd-pk-btn .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.jd-pk-btn .chev{ flex:none; transition:transform .25s; } .jd-pk-btn[aria-expanded="true"] .chev{ transform:rotate(180deg); }
+.jd-pk-menu{ position:absolute; z-index:40; top:calc(100% + 8px); left:0; min-width:100%; width:max-content; max-width:min(620px,92vw); max-height:320px; overflow:auto; background:var(--ink-800); border:1px solid var(--line); border-radius:14px; padding:6px; box-shadow:0 18px 40px rgba(0,0,0,.35); opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none; transform-origin:top left; transition:opacity .18s, transform .18s; }
+.jd-pk-menu.open{ opacity:1; transform:none; pointer-events:auto; }
+.jd-opt{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:transparent; border:0; color:var(--text-hi); padding:9px 12px; border-radius:9px; font:500 13.5px 'IBM Plex Sans',sans-serif; cursor:pointer; transition:background .15s, padding-left .15s; }
+.jd-opt:hover{ background:color-mix(in srgb,var(--red) 14%,transparent); padding-left:16px; }
+.jd-opt .ck{ width:14px; flex:none; color:var(--red); opacity:0; } .jd-opt.on .ck{ opacity:1; } .jd-opt.on{ font-weight:700; }
+.jd-opt .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.jd-opt em{ font-style:normal; font-size:11.5px; color:var(--text-lo); background:var(--line); border-radius:100px; padding:1px 8px; }
+.jd-pk-clear{ background:transparent; border:0; color:var(--red); font:600 12.5px 'IBM Plex Sans',sans-serif; cursor:pointer; padding:6px 4px; }
+.jd-pk-clear:hover{ text-decoration:underline; }
+/* ---- loading card ---- */
+.jd-loading{ grid-column:1/-1; text-align:center; padding:64px 20px; color:var(--text-lo); animation:jdFadeUp .4s both; }
+.jd-loading h3{ color:var(--text-hi); font-weight:600; margin:18px 0 6px; } .jd-loading p{ margin:0; }
+.jd-loading .dots b{ display:inline-block; animation:jdDot 1.2s infinite both; } .jd-loading .dots b:nth-child(2){ animation-delay:.2s; } .jd-loading .dots b:nth-child(3){ animation-delay:.4s; }
+@keyframes jdDot{ 0%,80%,100%{ opacity:.15; transform:translateY(0);} 40%{ opacity:1; transform:translateY(-3px);} }
+.jd-eq{ display:inline-flex; align-items:flex-end; gap:6px; height:44px; }
+.jd-eq i{ width:8px; border-radius:4px; background:linear-gradient(var(--red),var(--red-dim,var(--red))); animation:jdEq 1s ease-in-out infinite; }
+.jd-eq i:nth-child(1){ animation-delay:0s; } .jd-eq i:nth-child(2){ animation-delay:.12s; } .jd-eq i:nth-child(3){ animation-delay:.24s; } .jd-eq i:nth-child(4){ animation-delay:.36s; } .jd-eq i:nth-child(5){ animation-delay:.48s; }
+@keyframes jdEq{ 0%,100%{ height:10px; opacity:.5;} 50%{ height:44px; opacity:1;} }
+@media (prefers-reduced-motion:reduce){ .jd-eq i,.jd-loading .dots b{ animation:none; } }
+
 </style>
 </head>
 <body>
@@ -1691,6 +1719,8 @@ const JazzShell = (() => {
   const PAL = ["var(--red)", "var(--tag-1,#D8CFC8)", "var(--tag-2,#B4433A)", "var(--tag-3,#A79C92)", "var(--tag-4,#C9645A)", "var(--tag-5,#8F857A)"];
   const C = { open: "var(--red)", closed: "var(--status-closed,#8A8078)", ok: "var(--tag-1,#D8CFC8)", warn: "var(--tag-4,#C9645A)", dim: "var(--tag-2,#B4433A)" };
   const ICON = {
+    check: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>',
+    file: '<svg class="fi" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg>',
     summary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
     detail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>',
@@ -1772,19 +1802,52 @@ const JazzShell = (() => {
   }
 
   // ---- summary --------------------------------------------------------------
-  function renderSummary() {
+  let selected = null, t0 = Date.now(), statusSeen = false, menuOpen = false;
+  const LOADING_RE = /^\s*(checking|reading|opening|loading)/i;
+  function isLoading() {
+    if (Date.now() - t0 > 60000) return false;
+    const st = (($("#fileStatus") || {}).textContent || "").trim();
+    if (!st || LOADING_RE.test(st)) return true;
+    // status already moved on (e.g. "Couldn't read…", "Reconnect…") but data may still be rendering
+    return Date.now() - statusSince < 1200;
+  }
+  let statusSince = 0;
+  function pickerHTML(files) {
+    if (!files || files.length < 2) return "";
+    const label = selected && files.includes(selected) ? selected : "All files";
+    const items = [null].concat(files).map((f) => `<button type="button" role="option" class="jd-opt${(f === null ? !selected : f === selected) ? " on" : ""}" data-f="${f === null ? "" : esc(f)}"><span class="ck">${ICON.check || "✓"}</span><span class="nm">${f === null ? "All files" : esc(f)}</span>${f === null ? `<em>${files.length}</em>` : ""}</button>`).join("");
+    return `<div class="jd-picker"><span class="jd-pk-lab">Showing</span><div class="jd-pk"><button type="button" class="jd-pk-btn" id="jdPkBtn" aria-haspopup="listbox" aria-expanded="${menuOpen}">${ICON.file || ""}<span class="nm">${esc(label)}</span><svg class="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button><div class="jd-pk-menu${menuOpen ? " open" : ""}" id="jdPkMenu" role="listbox">${items}</div></div>${selected ? `<button type="button" class="jd-pk-clear" id="jdPkClear">Show all files</button>` : ""}</div>`;
+  }
+  function bindPicker(root) {
+    const btn = $("#jdPkBtn", root), menu = $("#jdPkMenu", root);
+    if (!btn) return;
+    btn.addEventListener("click", (e) => { e.stopPropagation(); menuOpen = !menuOpen; menu.classList.toggle("open", menuOpen); btn.setAttribute("aria-expanded", menuOpen); });
+    menu.querySelectorAll(".jd-opt").forEach((o) => o.addEventListener("click", () => { selected = o.dataset.f || null; menuOpen = false; lastSig = ""; renderSummary(true); }));
+    const clr = $("#jdPkClear", root); if (clr) clr.addEventListener("click", () => { selected = null; lastSig = ""; renderSummary(true); });
+  }
+  document.addEventListener("click", () => { if (menuOpen) { menuOpen = false; const m = document.getElementById("jdPkMenu"), b = document.getElementById("jdPkBtn"); if (m) m.classList.remove("open"); if (b) b.setAttribute("aria-expanded", "false"); } });
+
+  function renderSummary(fromPicker) {
     if (view !== "summary") return;
+    let files = [];
+    try { files = (cfg.files && cfg.files()) || []; } catch (e) {}
+    if (selected && !files.includes(selected)) selected = null;
     let blocks = null;
-    try { blocks = cfg.summary(); } catch (e) { console.warn("Summary failed:", e); }
+    try { blocks = cfg.summary(selected); } catch (e) { console.warn("Summary failed:", e); }
     const root = $("#jdSummary");
-    const sig = JSON.stringify(blocks);
+    const loadingNow = !(blocks && blocks.length) && isLoading();
+    const sig = JSON.stringify([blocks, files, selected, loadingNow, menuOpen && 0]);
     if (sig === lastSig) return;
     lastSig = sig;
+    if (loadingNow) {
+      root.innerHTML = `<div class="jd-grid"><div class="jd-card jd-loading"><div class="jd-eq"><i></i><i></i><i></i><i></i><i></i></div><h3>Data loading<span class="dots"><b>.</b><b>.</b><b>.</b></span></h3><p>Reading your files — the summary will appear in a moment.</p></div></div>`;
+      return;
+    }
     if (!blocks || !blocks.length) {
       const st = ($("#fileStatus") || {}).textContent || "";
       const needsReconnect = $("#reconnectBtn") && $("#reconnectBtn").style.display !== "none";
-      root.innerHTML = `<div class="jd-grid"><div class="jd-card jd-empty"><h3>${needsReconnect ? "Reconnect to your files" : "Nothing to summarise yet"}</h3><p>${esc(st || "Open files from the Jazz Dash home page to see the summary.")}</p><button type="button" class="jd-go" id="jdGoDetail">Go to Detail</button></div></div>`;
-      $("#jdGoDetail").addEventListener("click", () => show("detail"));
+      root.innerHTML = pickerHTML(files) + `<div class="jd-grid"><div class="jd-card jd-empty"><h3>${needsReconnect ? "Reconnect to your files" : "Nothing to summarise yet"}</h3><p>${esc(st || "Open files from the Jazz Dash home page to see the summary.")}</p><button type="button" class="jd-go" id="jdGoDetail">Go to Detail</button></div></div>`;
+      $("#jdGoDetail").addEventListener("click", () => show("detail")); bindPicker(root);
       return;
     }
     let i = 0;
@@ -1800,7 +1863,8 @@ const JazzShell = (() => {
       else if (b.kind === "line") body = head + lineHTML(b);
       return `<div class="jd-card ${span}" style="--i:${n}">${body}</div>`;
     }).join("");
-    root.innerHTML = `<div class="jd-grid">${html}</div>`;
+    root.innerHTML = pickerHTML(files) + `<div class="jd-grid">${html}</div>`;
+    bindPicker(root);
     animate(root);
   }
 
@@ -1886,6 +1950,9 @@ const JazzShell = (() => {
         if (typeof orig !== "function") return;
         window[name] = function () { const r = orig.apply(this, arguments); refresh(); return r; };
       });
+      const fs = $("#fileStatus");
+      if (fs) new MutationObserver(() => { statusSince = Date.now(); refresh(); setTimeout(refresh, 1300); }).observe(fs, { childList: true, characterData: true, subtree: true });
+      setInterval(() => { if (view === "summary" && Date.now() - t0 < 62000) refresh(); }, 2000);
       show(location.hash === "#detail" ? "detail" : "summary");
       refresh();
     };
@@ -1897,14 +1964,15 @@ const JazzShell = (() => {
 JazzShell.init({
   title: "Risk Management Dashboard",
   patch: ["renderCurrentView"],
-  summary() {
-    const items = getAllItems();
+  files() { return Object.keys(fileSessions); },
+  summary(scope) {
+    const items = getAllItems().filter((i) => !scope || i.sourceFile === scope);
     if (!items.length) return null;
     const C = JazzShell.C, OVER = C.open, INDUE = C.ok, CLOSED = C.closed;
     const by = (k) => items.filter((i) => i.dueStatus === k).length;
     const total = items.length, closed = by("closed"), over = by("overdue"), indue = by("indue");
     const out = [];
-    out.push({ kind: "kpi", label: "Total Issues", value: total, sub: `${Object.keys(fileSessions).length} file(s) loaded`, span: 3 });
+    out.push({ kind: "kpi", label: "Total Issues", value: total, sub: scope ? scope : `${Object.keys(fileSessions).length} file(s) loaded`, span: 3 });
     out.push({ kind: "kpi", label: "Closed", value: closed, tone: "closed", sub: pct(closed, total) + " of all issues", span: 3 });
     out.push({ kind: "kpi", label: "Over Due", value: over, sub: pct(over, total) + " of all issues", span: 3 });
     out.push({ kind: "kpi", label: "In Due", value: indue, tone: "ok", sub: pct(indue, total) + " of all issues", span: 3 });
