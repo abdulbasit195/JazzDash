@@ -627,6 +627,7 @@ function createDriveFileHandle(fileId, name, modifiedTime) {
   return {
     kind: "file",
     name,
+    driveFileId: fileId, // lets the files list open the original in Google Drive (double-click)
     async getFile() {
       const cached = await driveCacheGet(fileId).catch(() => undefined);
       // Fast path: the Jazz Dash home page listed this file moments ago and told us its
@@ -792,12 +793,26 @@ function orderedFileNames() {
   return [...known, ...unknown];
 }
 
+
+// Double-click a file name in the files list -> open the ORIGINAL file in Google
+// Drive in a new tab. Only files that came from Drive have an id to open;
+// files picked from the computer just say so.
+function openOriginalInDrive(handle) {
+  const el = document.getElementById("fileStatus");
+  if (handle && handle.driveFileId) {
+    window.open(`https://drive.google.com/file/d/${encodeURIComponent(handle.driveFileId)}/view`, "_blank", "noopener");
+    if (el) el.textContent = "Opening the original file in Google Drive…";
+  } else if (el) {
+    el.textContent = "This file was opened from your computer, so there is no Drive copy to open.";
+  }
+}
+
 function renderSwitchList() {
   const container = document.getElementById("switchFileList");
   const names = orderedFileNames();
   if (!names.length) { container.style.display = "none"; return; }
   container.style.display = "";
-  container.innerHTML = `<div class="ff-label">FILES LOADED — CLICK TO SET "THIS FILE", DRAG TO REORDER</div>` +
+  container.innerHTML = `<div class="ff-label">FILES LOADED — CLICK TO SET "THIS FILE", DOUBLE-CLICK TO OPEN IN DRIVE, DRAG TO REORDER</div>` +
     names.map((n) => {
       const isCurrent = n === activeFileName;
       const itemCount = getItemsForSession(fileSessions[n]).length;
@@ -819,6 +834,16 @@ function renderSwitchList() {
     });
   });
   wireFileReordering(container);
+  if (!container.dataset.dblWired) {
+    container.dataset.dblWired = "1"; // delegated, so it survives the list being re-drawn after the first click
+    container.addEventListener("click", (e) => {
+      if (e.detail !== 2) return; // 2nd click of a double-click (the list may be re-drawn after the 1st click, which can swallow a native dblclick event)
+      const row = e.target.closest("[data-file]");
+      if (!row) return;
+      const session = fileSessions[row.getAttribute("data-file")];
+      openOriginalInDrive(session && session.fileHandle);
+    });
+  }
 }
 
 // --------------------------------------------------------- file ordering --

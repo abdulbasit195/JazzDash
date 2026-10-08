@@ -1003,6 +1003,20 @@ async function listXlsxInDirectory(dirHandle) {
 // clickable at all times once a folder's been chosen — including after a
 // file is open — so switching to a different file in the same folder never
 // needs the OS folder-picker dialog again.
+
+// Double-click a file name in the files list -> open the ORIGINAL file in Google
+// Drive in a new tab. Only files that came from Drive have an id to open;
+// files picked from the computer just say so.
+function openOriginalInDrive(handle) {
+  const el = document.getElementById("fileStatus");
+  if (handle && handle.driveFileId) {
+    window.open(`https://drive.google.com/file/d/${encodeURIComponent(handle.driveFileId)}/view`, "_blank", "noopener");
+    if (el) el.textContent = "Opening the original file in Google Drive…";
+  } else if (el) {
+    el.textContent = "This file was opened from your computer, so there is no Drive copy to open.";
+  }
+}
+
 function renderSwitchList() {
   const container = document.getElementById("switchFileList");
   updateViewTabsVisibility();
@@ -1011,7 +1025,7 @@ function renderSwitchList() {
     return;
   }
   container.style.display = "";
-  container.innerHTML = `<div class="ff-label">FILES IN THIS FOLDER — CLICK TO SWITCH</div>` +
+  container.innerHTML = `<div class="ff-label">FILES IN THIS FOLDER — CLICK TO SWITCH, DOUBLE-CLICK TO OPEN IN DRIVE</div>` +
     currentFolderFiles.map((f, i) => {
       const isCurrent = f.name === fileName;
       return `<div class="ff-item ${isCurrent ? "ff-current" : ""}" data-idx="${i}">
@@ -1025,6 +1039,16 @@ function renderSwitchList() {
       if (f.name !== fileName) useFileHandle(f.handle);
     });
   });
+  if (!container.dataset.dblWired) {
+    container.dataset.dblWired = "1";
+    container.addEventListener("click", (e) => {
+      if (e.detail !== 2) return; // 2nd click of a double-click (the list may be re-drawn after the 1st click, which can swallow a native dblclick event)
+      const row = e.target.closest("[data-idx]");
+      if (!row) return;
+      const f = currentFolderFiles[Number(row.getAttribute("data-idx"))];
+      openOriginalInDrive(f && f.handle);
+    });
+  }
 }
 
 async function useFileHandle(handle, opts = {}) {
@@ -2521,6 +2545,7 @@ function createDriveFileHandle(fileId, name, modifiedTime) {
   return {
     kind: "file",
     name,
+    driveFileId: fileId, // lets the files list open the original in Google Drive (double-click)
 
     // Returns a real File object holding this Drive file's current bytes.
     // Always checks freshness first (a small metadata-only request for
