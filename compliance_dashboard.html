@@ -370,6 +370,166 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
 }
 
 </style>
+<style id="jd-shell-css">
+/* =========================================================================
+   JAZZ DASH SHELL — left panel, greeting header, Summary / Detail views,
+   charts and motion. Shared (copy-pasted) by every Jazz Dash dashboard; it
+   only relies on the colour variables each dashboard already defines
+   (--ink-*, --line, --text-*, --red, --red-dim) so dark/light just works.
+   ========================================================================= */
+.jd-shell{ overflow-x:hidden; }
+.jd-app{ display:flex; min-height:100vh; }
+
+/* ---------------------------------------------------------------- sidebar */
+.jd-side{
+  position:sticky; top:0; align-self:flex-start; height:100vh; width:252px; flex:none;
+  display:flex; flex-direction:column; padding:26px 20px 24px; gap:6px;
+  background:var(--ink-800); border-right:1px solid var(--line); overflow:hidden; z-index:5;
+}
+.jd-brand{ display:flex; align-items:center; gap:11px; font-weight:700; font-size:19px; letter-spacing:.2px; margin-bottom:26px; text-decoration:none; color:var(--text-hi); }
+.jd-brand b{ color:var(--text-hi); font-weight:700; } .jd-brand i{ color:var(--red); font-style:normal; }
+.jd-logo{ width:36px; height:36px; border-radius:10px; object-fit:contain; flex:none; transition:transform .5s cubic-bezier(.3,1.6,.5,1); }
+.jd-brand:hover .jd-logo{ transform:rotate(-10deg) scale(1.12); }
+.jd-nav-label{ font-size:11px; font-weight:700; letter-spacing:1.4px; color:var(--text-hi); margin:2px 0 12px 4px; }
+.jd-nav{ display:flex; flex-direction:column; gap:6px; }
+.jd-nav button, .jd-side .jd-link{
+  position:relative; display:flex; align-items:center; gap:11px; width:100%; text-align:left;
+  font:500 14.5px 'IBM Plex Sans',sans-serif; color:var(--text-lo); background:transparent; border:0;
+  padding:11px 14px; border-radius:100px; cursor:pointer; text-decoration:none;
+  transition:background .25s ease, color .25s ease, transform .25s ease, box-shadow .25s ease;
+}
+.jd-nav button svg, .jd-side .jd-link svg{ width:18px; height:18px; flex:none; transition:transform .35s cubic-bezier(.3,1.6,.5,1); }
+.jd-nav button .jd-chev{ margin-left:auto; width:14px; height:14px; opacity:.55; transition:transform .25s ease, opacity .25s ease; }
+.jd-nav button:hover, .jd-side .jd-link:hover{ color:var(--text-hi); background:var(--hover-overlay, rgba(127,127,127,.08)); transform:translateX(3px); }
+.jd-nav button:hover svg:not(.jd-chev), .jd-side .jd-link:hover svg{ animation:jdWiggle .6s ease; }
+.jd-nav button:hover .jd-chev{ transform:translateX(3px); opacity:1; }
+.jd-nav button.active{ color:#fff; background:linear-gradient(135deg,var(--red),var(--red-dim)); box-shadow:0 8px 22px -8px var(--red); transform:none; }
+.jd-nav button.active .jd-chev{ opacity:0; }
+.jd-sep{ height:1px; margin:16px 6px; background:linear-gradient(90deg,transparent,var(--line),transparent); }
+.jd-side .jd-link{ font-size:13.5px; }
+.jd-glow{
+  position:absolute; right:-70px; bottom:-70px; width:240px; height:240px; border-radius:50%; pointer-events:none;
+  background:radial-gradient(circle at 50% 50%, var(--red) 0%, rgba(226,67,74,.38) 38%, transparent 70%); opacity:.55; filter:blur(8px);
+  animation:jdGlow 5s ease-in-out infinite;
+}
+:root[data-theme="light"] .jd-glow{ opacity:.42; }
+@keyframes jdGlow{ 0%,100%{ transform:scale(1); opacity:.5; } 50%{ transform:scale(1.12); opacity:.72; } }
+@keyframes jdWiggle{ 0%{transform:rotate(0)} 25%{transform:rotate(-14deg) scale(1.12)} 55%{transform:rotate(11deg) scale(1.12)} 100%{transform:rotate(0)} }
+
+/* ------------------------------------------------------------- main + top */
+.jd-main{ flex:1; min-width:0; padding:30px 38px 80px; }
+.jd-top{ position:relative; margin-bottom:26px; animation:jdFadeUp .6s ease both; }
+.jd-hello{ display:flex; align-items:center; gap:13px; font-size:14.5px; color:var(--text-hi); }
+.jd-avatar{ width:44px; height:44px; border-radius:50%; flex:none; object-fit:cover; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--red),var(--red-dim)); color:#fff; font-weight:700; font-size:16px; box-shadow:0 0 0 3px var(--ink-900), 0 0 0 4px var(--line); transition:transform .4s cubic-bezier(.3,1.6,.5,1), box-shadow .3s; }
+.jd-avatar:hover{ transform:scale(1.08) rotate(-4deg); box-shadow:0 0 0 3px var(--ink-900), 0 0 0 5px var(--red); }
+.jd-title{ margin:22px 0 0; font:300 clamp(26px,3.4vw,36px)/1.15 'IBM Plex Sans',sans-serif; letter-spacing:-.3px; color:var(--text-hi); }
+.jd-shell .theme-toggle{ position:absolute; top:2px; right:0; left:auto; transition:transform .5s cubic-bezier(.3,1.6,.5,1), border-color .2s, color .2s; }
+.jd-shell .theme-toggle:hover{ transform:rotate(25deg) scale(1.1); }
+
+.jd-view{ animation:jdFadeUp .55s cubic-bezier(.2,.8,.2,1) both; }
+.jd-view[hidden]{ display:none; }
+@keyframes jdFadeUp{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:none; } }
+@keyframes jdPop{ from{ opacity:0; transform:translateY(16px) scale(.97); } to{ opacity:1; transform:none; } }
+
+/* ---------------------------------------------------------------- summary */
+.jd-grid{ display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:18px; }
+.jd-sec{ grid-column:1/-1; font:700 11.5px 'IBM Plex Sans',sans-serif; letter-spacing:1.4px; color:var(--text-lo); text-transform:uppercase; margin:10px 2px -4px; display:flex; align-items:center; gap:10px; }
+.jd-sec::after{ content:""; flex:1; height:1px; background:var(--line); }
+.jd-card{
+  position:relative; background:var(--ink-800); border:1px solid var(--line); border-radius:18px; padding:20px 22px; min-width:0;
+  animation:jdPop .6s cubic-bezier(.2,.8,.2,1) both; animation-delay:calc(var(--i,0) * 70ms);
+  transition:transform .3s ease, box-shadow .3s ease, border-color .3s ease;
+}
+.jd-card:hover{ transform:translateY(-4px); border-color:var(--red-dim); box-shadow:0 16px 36px -18px rgba(226,67,74,.55); }
+.jd-span-3{ grid-column:span 3; } .jd-span-4{ grid-column:span 4; } .jd-span-5{ grid-column:span 5; } .jd-span-6{ grid-column:span 6; }
+.jd-span-7{ grid-column:span 7; } .jd-span-8{ grid-column:span 8; } .jd-span-12{ grid-column:1/-1; }
+.jd-kpi-head{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text-hi); }
+.jd-sq{ width:15px; height:15px; border-radius:4px; background:linear-gradient(135deg,var(--red),#ff8a8f); flex:none; transition:transform .4s cubic-bezier(.3,1.6,.5,1); }
+.jd-card:hover .jd-sq{ transform:rotate(90deg) scale(1.15); }
+.jd-sq.t-closed{ background:linear-gradient(135deg,#9a8f87,#cfc6bf); } .jd-sq.t-ok{ background:linear-gradient(135deg,#d8cfc8,#fff); } .jd-sq.t-warn{ background:linear-gradient(135deg,#c9645a,#e9a29b); }
+.jd-kpi-val{ font:500 clamp(30px,3.2vw,42px)/1.1 'IBM Plex Sans',sans-serif; margin-top:18px; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+.jd-kpi-sub{ font-size:12px; color:var(--text-lo); margin-top:6px; }
+.jd-ctitle{ font-size:14px; font-weight:600; color:var(--text-hi); margin:0 0 3px; }
+.jd-csub{ font-size:12px; color:var(--text-lo); margin:0 0 14px; }
+.jd-empty{ grid-column:1/-1; text-align:center; padding:54px 20px; color:var(--text-lo); }
+.jd-empty h3{ color:var(--text-hi); font-weight:600; margin:0 0 6px; } .jd-empty p{ margin:0 0 16px; }
+.jd-empty .jd-go{ display:inline-block; font:600 13.5px 'IBM Plex Sans',sans-serif; color:#fff; background:var(--red); border:0; border-radius:100px; padding:10px 20px; cursor:pointer; transition:transform .2s, background .2s; }
+.jd-empty .jd-go:hover{ transform:translateY(-2px); background:var(--red-dim); }
+
+/* donut */
+.jd-donut{ display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+.jd-donut svg{ width:168px; height:168px; flex:none; transform:rotate(-90deg); overflow:visible; }
+.jd-donut .seg{ fill:none; stroke-width:15; stroke-linecap:butt; cursor:pointer; transition:stroke-dasharray 1.1s cubic-bezier(.2,.8,.2,1), stroke-width .2s ease, opacity .2s ease; }
+.jd-donut:hover .seg{ opacity:.55; } .jd-donut .seg:hover, .jd-donut .seg.hot{ opacity:1; stroke-width:19; }
+.jd-donut .track{ fill:none; stroke:var(--ink-700); stroke-width:15; }
+.jd-donut-wrap{ position:relative; width:168px; height:168px; flex:none; }
+.jd-donut-wrap svg{ position:absolute; inset:0; }
+.jd-donut-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+.jd-donut-center b{ font:500 28px 'IBM Plex Sans',sans-serif; font-variant-numeric:tabular-nums; } .jd-donut-center span{ font-size:11.5px; color:var(--text-lo); }
+.jd-legend{ display:flex; flex-direction:column; gap:9px; flex:1; min-width:140px; }
+.jd-legend .li{ display:flex; align-items:center; gap:9px; font-size:13px; cursor:default; padding:3px 6px; margin:-3px -6px; border-radius:8px; transition:background .2s, transform .2s; }
+.jd-legend .li:hover, .jd-legend .li.hot{ background:var(--hover-overlay, rgba(127,127,127,.08)); transform:translateX(3px); }
+.jd-legend .dot{ width:10px; height:10px; border-radius:3px; flex:none; } .jd-legend .v{ margin-left:auto; color:var(--text-lo); font-variant-numeric:tabular-nums; }
+.jd-legend .li .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* horizontal bars (single or stacked) */
+.jd-bars{ display:flex; flex-direction:column; gap:11px; }
+.jd-bar{ display:grid; grid-template-columns:minmax(80px,32%) 1fr 38px; align-items:center; gap:12px; font-size:12.5px; padding:2px 4px; margin:0 -4px; border-radius:8px; transition:background .2s; }
+.jd-bar:hover{ background:var(--hover-overlay, rgba(127,127,127,.08)); }
+.jd-bar .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-hi); }
+.jd-bar .tr{ height:11px; border-radius:100px; background:var(--ink-700); overflow:hidden; display:flex; }
+.jd-bar .fl{ height:100%; width:0; transition:width 1s cubic-bezier(.2,.8,.2,1); transition-delay:calc(var(--k,0) * 60ms); cursor:pointer; }
+.jd-bar .fl + .fl{ box-shadow:-1px 0 0 var(--ink-800); }
+.jd-bar .fl:hover{ filter:brightness(1.18); }
+.jd-bar .n{ text-align:right; color:var(--text-lo); font-variant-numeric:tabular-nums; }
+.jd-keys{ display:flex; gap:14px; flex-wrap:wrap; margin-top:14px; font-size:11.5px; color:var(--text-lo); }
+.jd-keys span{ display:inline-flex; align-items:center; gap:6px; } .jd-keys i{ width:9px; height:9px; border-radius:3px; display:inline-block; }
+
+/* line / area */
+.jd-line svg{ width:100%; height:210px; overflow:visible; display:block; }
+.jd-line .ln{ fill:none; stroke:var(--red); stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:jdDraw 1.6s .2s cubic-bezier(.3,.6,.3,1) forwards; }
+.jd-line .ar{ fill:url(#jdArea); opacity:0; animation:jdFadeIn 1s 1s ease forwards; }
+.jd-line .pt{ fill:var(--ink-800); stroke:var(--red); stroke-width:2.4; opacity:0; animation:jdFadeIn .4s ease forwards; cursor:pointer; transition:r .2s; }
+.jd-line .pt:hover{ r:7; fill:var(--red); }
+.jd-line .gl{ stroke:var(--line); stroke-width:1; stroke-dasharray:3 5; } .jd-line text{ font:11px 'IBM Plex Sans',sans-serif; fill:var(--text-lo); }
+@keyframes jdDraw{ to{ stroke-dashoffset:0; } } @keyframes jdFadeIn{ to{ opacity:1; } }
+
+.jd-tip{ position:fixed; z-index:200; pointer-events:none; background:var(--text-hi); color:var(--ink-900); font:500 12px 'IBM Plex Sans',sans-serif; padding:6px 10px; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.35); opacity:0; transform:translateY(4px); transition:opacity .12s, transform .12s; white-space:nowrap; }
+.jd-tip.on{ opacity:1; transform:none; }
+
+/* ----------------------------------------------------------------- detail */
+#jdDetail .wrap{ max-width:none; padding:0; margin:0; }
+#jdDetail header.report-head .eyebrow, #jdDetail #statRow, #jdDetail #circularStatRow{ display:none !important; }
+#jdDetail header.report-head{ border-bottom:0; padding-bottom:6px; margin-bottom:16px; }
+#jdDetail #homeLink{ display:none; }
+#jdDetail .corner-badge{ position:static; display:inline-flex; margin:0 0 16px; }
+#jdDetail .folder-files{ border-radius:16px; overflow:hidden; }
+#jdDetail .ff-item{ transition:background .2s, transform .2s, padding-left .2s; }
+#jdDetail .ff-item:hover{ transform:translateX(4px); }
+#jdDetail .chip, #jdDetail .btn, #jdDetail .view-tab, #jdDetail .clear-link{ transition:transform .2s ease, background .2s, border-color .2s, color .2s, box-shadow .2s; }
+#jdDetail .chip:hover, #jdDetail .btn:hover, #jdDetail .view-tab:hover{ transform:translateY(-2px); }
+#jdDetail .brief-card, #jdDetail .tab-group, #jdDetail .obs-card, #jdDetail .sev-group{ transition:transform .25s ease, box-shadow .25s ease, border-color .25s; }
+#jdDetail .brief-card:hover{ box-shadow:0 12px 28px -18px rgba(226,67,74,.5); }
+#jdDetail .brief-card[open] > .brief-detail, #jdDetail .tab-group[open] > *:not(summary){ animation:jdFadeUp .35s ease both; }
+#jdDetail .filters, #jdDetail .toolbar, #jdDetail .section-controls{ animation:jdFadeUp .5s ease both; }
+
+@media (max-width:900px){
+  .jd-app{ flex-direction:column; }
+  .jd-side{ position:relative; width:auto; height:auto; flex-direction:row; align-items:center; flex-wrap:wrap; padding:14px 16px; gap:8px; border-right:0; border-bottom:1px solid var(--line); }
+  .jd-brand{ margin:0 12px 0 0; } .jd-nav-label,.jd-sep,.jd-glow{ display:none; }
+  .jd-nav{ flex-direction:row; } .jd-nav button{ width:auto; padding:9px 14px; } .jd-nav button .jd-chev{ display:none; }
+  .jd-side .jd-link{ width:auto; padding:9px 12px; margin-left:auto; }
+  .jd-main{ padding:22px 16px 60px; }
+  .jd-span-3,.jd-span-4,.jd-span-5,.jd-span-6,.jd-span-7,.jd-span-8{ grid-column:span 6; }
+}
+@media (max-width:560px){
+  .jd-span-3,.jd-span-4,.jd-span-5,.jd-span-6,.jd-span-7,.jd-span-8{ grid-column:1/-1; }
+  .jd-bar{ grid-template-columns:minmax(70px,38%) 1fr 30px; }
+}
+@media (prefers-reduced-motion:reduce){ .jd-shell *{ animation-duration:.001s !important; animation-delay:0s !important; transition-duration:.001s !important; } }
+
+</style>
 </head>
 <body>
 
@@ -3065,6 +3225,294 @@ document.getElementById("themeToggleBtn").addEventListener("click", () => {
 applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
 
 window.addEventListener("load", receiveJazzDashHandoff);
+
+</script>
+
+<script>
+// =============================================================================
+// JAZZ DASH SHELL — shared by every Jazz Dash dashboard (copy-pasted, like the
+// hand-off block). Builds the left panel, the "Hello {name}" header and the
+// Summary / Detail views around the dashboard's EXISTING markup, and draws the
+// Summary charts (plain SVG/CSS — no chart library, nothing to download).
+// Each dashboard only supplies JazzShell.init({ title, patch, summary }):
+//   title   — dashboard name shown under the greeting
+//   patch   — names of the dashboard's own render functions; the Summary is
+//             refreshed whenever one of them runs
+//   summary — () => null (nothing loaded yet) or an array of blocks:
+//     {kind:"section", title}
+//     {kind:"kpi",   label, value, sub, tone, span}
+//     {kind:"donut", title, sub, segments:[{label,value,color}], center, span}
+//     {kind:"bars",  title, sub, rows:[{label,parts:[{value,color,label}]}], keys:[{label,color}], span}
+//     {kind:"line",  title, sub, points:[{label,value}], span}
+// =============================================================================
+const JazzShell = (() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const PAL = ["var(--red)", "var(--tag-1,#D8CFC8)", "var(--tag-2,#B4433A)", "var(--tag-3,#A79C92)", "var(--tag-4,#C9645A)", "var(--tag-5,#8F857A)"];
+  const C = { open: "var(--red)", closed: "var(--status-closed,#8A8078)", ok: "var(--tag-1,#D8CFC8)", warn: "var(--tag-4,#C9645A)", dim: "var(--tag-2,#B4433A)" };
+  const ICON = {
+    summary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+    detail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
+    home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>',
+    chev: '<svg class="jd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  };
+  let cfg = null, view = "summary", lastSig = "", tipEl = null;
+
+  // ---- who is signed in (the Jazz Dash home page caches the Google profile for this tab)
+  function currentUser() {
+    try { const c = JSON.parse(sessionStorage.getItem("jazzdash_access_cache") || "null"); return (c && c.user) || null; } catch (e) { return null; }
+  }
+  function nameFromEmail(email) {
+    const local = String(email || "").split("@")[0];
+    return local.split(/[._\-+\d]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  }
+
+  // ---- layout ---------------------------------------------------------------
+  function build() {
+    const wrap = $(".wrap");
+    if (!wrap || document.body.classList.contains("jd-shell")) return;
+    document.body.classList.add("jd-shell");
+    const icon = (document.querySelector('link[rel="icon"]') || {}).href || "";
+    const user = currentUser();
+    const name = user ? (nameFromEmail(user.email) || user.name || "") : "";
+    const initial = (name || "J")[0].toUpperCase();
+
+    const app = document.createElement("div");
+    app.className = "jd-app";
+    app.innerHTML = `
+      <aside class="jd-side">
+        <a class="jd-brand" href="index.html" title="Back to Jazz Dash home">${icon ? `<img class="jd-logo" src="${esc(icon)}" alt="">` : ""}<span><b>Jazz</b> <i>Dash</i></span></a>
+        <div class="jd-nav-label">DASHBOARD</div>
+        <nav class="jd-nav">
+          <button type="button" data-view="summary" class="active">${ICON.summary}<span>Summary</span>${ICON.chev}</button>
+          <button type="button" data-view="detail">${ICON.detail}<span>Detail</span>${ICON.chev}</button>
+        </nav>
+        <div class="jd-sep"></div>
+        <a class="jd-link" href="index.html">${ICON.home}<span>Jazz Dash home</span></a>
+        <div class="jd-glow"></div>
+      </aside>
+      <div class="jd-main">
+        <header class="jd-top">
+          <div class="jd-hello">
+            ${user && user.picture ? `<img class="jd-avatar" src="${esc(user.picture)}" alt="" referrerpolicy="no-referrer">` : `<span class="jd-avatar">${esc(initial)}</span>`}
+            <span>Hello${name ? " " + esc(name) : ""}</span>
+          </div>
+          <h1 class="jd-title">${esc(cfg.title)}</h1>
+        </header>
+        <section id="jdSummary" class="jd-view"></section>
+        <section id="jdDetail" class="jd-view" hidden></section>
+      </div>`;
+    document.body.insertBefore(app, document.body.firstChild);
+    $("#jdDetail").appendChild(wrap);
+    const toggle = $("#themeToggleBtn"); if (toggle) $(".jd-top").appendChild(toggle);
+    const badge = $("#cornerBadge"); if (badge) wrap.insertBefore(badge, wrap.firstChild);
+    const img = $(".jd-avatar", app);
+    if (img && img.tagName === "IMG") img.addEventListener("error", () => { const s = document.createElement("span"); s.className = "jd-avatar"; s.textContent = initial; img.replaceWith(s); });
+    app.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => show(b.getAttribute("data-view"))));
+    tipEl = document.createElement("div"); tipEl.className = "jd-tip"; document.body.appendChild(tipEl);
+    document.addEventListener("mousemove", (e) => {
+      const t = e.target.closest && e.target.closest("[data-tip]");
+      if (!t) { tipEl.classList.remove("on"); return; }
+      tipEl.textContent = t.getAttribute("data-tip");
+      tipEl.style.left = Math.min(e.clientX + 14, innerWidth - tipEl.offsetWidth - 10) + "px";
+      tipEl.style.top = (e.clientY + 16) + "px";
+      tipEl.classList.add("on");
+    });
+    document.addEventListener("mouseleave", () => tipEl.classList.remove("on"));
+  }
+
+  function show(v) {
+    view = v;
+    document.querySelectorAll(".jd-nav [data-view]").forEach((b) => b.classList.toggle("active", b.getAttribute("data-view") === v));
+    $("#jdSummary").hidden = v !== "summary";
+    $("#jdDetail").hidden = v !== "detail";
+    if (v === "summary") { lastSig = ""; renderSummary(); }
+    try { history.replaceState(null, "", "#" + v); } catch (e) {}
+    window.scrollTo({ top: 0 });
+  }
+
+  // ---- summary --------------------------------------------------------------
+  function renderSummary() {
+    if (view !== "summary") return;
+    let blocks = null;
+    try { blocks = cfg.summary(); } catch (e) { console.warn("Summary failed:", e); }
+    const root = $("#jdSummary");
+    const sig = JSON.stringify(blocks);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    if (!blocks || !blocks.length) {
+      const st = ($("#fileStatus") || {}).textContent || "";
+      const needsReconnect = $("#reconnectBtn") && $("#reconnectBtn").style.display !== "none";
+      root.innerHTML = `<div class="jd-grid"><div class="jd-card jd-empty"><h3>${needsReconnect ? "Reconnect to your files" : "Nothing to summarise yet"}</h3><p>${esc(st || "Open files from the Jazz Dash home page to see the summary.")}</p><button type="button" class="jd-go" id="jdGoDetail">Go to Detail</button></div></div>`;
+      $("#jdGoDetail").addEventListener("click", () => show("detail"));
+      return;
+    }
+    let i = 0;
+    const html = blocks.map((b) => {
+      const n = i++;
+      if (b.kind === "section") return `<div class="jd-sec">${esc(b.title)}</div>`;
+      const span = `jd-span-${b.span || (b.kind === "kpi" ? 3 : 6)}`;
+      const head = b.title ? `<h3 class="jd-ctitle">${esc(b.title)}</h3>${b.sub ? `<p class="jd-csub">${esc(b.sub)}</p>` : ""}` : "";
+      let body = "";
+      if (b.kind === "kpi") body = `<div class="jd-kpi-head"><span class="jd-sq ${b.tone ? "t-" + b.tone : ""}"></span>${esc(b.label)}</div><div class="jd-kpi-val cu" data-v="${Number(b.value) || 0}">0</div>${b.sub ? `<div class="jd-kpi-sub">${esc(b.sub)}</div>` : ""}`;
+      else if (b.kind === "donut") body = head + donutHTML(b);
+      else if (b.kind === "bars") body = head + barsHTML(b);
+      else if (b.kind === "line") body = head + lineHTML(b);
+      return `<div class="jd-card ${span}" style="--i:${n}">${body}</div>`;
+    }).join("");
+    root.innerHTML = `<div class="jd-grid">${html}</div>`;
+    animate(root);
+  }
+
+  function donutHTML(b) {
+    const segs = (b.segments || []).filter((s) => s.value > 0);
+    const total = segs.reduce((a, s) => a + s.value, 0);
+    let acc = 0;
+    const circles = segs.map((s, k) => {
+      const len = (s.value / total) * 100;
+      const el = `<circle class="seg" cx="60" cy="60" r="${R}" pathLength="100" data-k="${k}" data-len="${len}" data-off="${acc}" data-tip="${esc(s.label)}: ${s.value} (${Math.round(len)}%)" style="stroke:${s.color || PAL[k % PAL.length]};stroke-dasharray:0 100;stroke-dashoffset:${-acc}"/>`;
+      acc += len; return el;
+    }).join("");
+    const legend = (b.segments || []).map((s, k) => `<div class="li" data-k="${segs.indexOf(s)}"><span class="dot" style="background:${s.color || PAL[k % PAL.length]}"></span><span class="nm">${esc(s.label)}</span><span class="v">${s.value}${total ? " · " + Math.round((s.value / total) * 100) + "%" : ""}</span></div>`).join("");
+    return `<div class="jd-donut"><div class="jd-donut-wrap"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="${R}"/>${circles}</svg><div class="jd-donut-center"><b class="cu" data-v="${total}">0</b><span>${esc(b.center || "Total")}</span></div></div><div class="jd-legend">${legend}</div></div>`;
+  }
+  const R = 46;
+
+  function barsHTML(b) {
+    const rows = b.rows || [];
+    const max = Math.max(1, ...rows.map((r) => r.parts.reduce((a, p) => a + p.value, 0)));
+    const html = rows.map((r, k) => {
+      const tot = r.parts.reduce((a, p) => a + p.value, 0);
+      const fills = r.parts.filter((p) => p.value > 0).map((p, j) => `<div class="fl" data-w="${(p.value / max) * 100}" data-tip="${esc(r.label)} — ${esc(p.label || "")}${p.label ? ": " : ""}${p.value}" style="background:${p.color || PAL[0]}"></div>`).join("");
+      return `<div class="jd-bar" style="--k:${k}"><span class="nm" title="${esc(r.label)}">${esc(r.label)}</span><div class="tr">${fills}</div><span class="n">${tot}</span></div>`;
+    }).join("") || `<div class="jd-csub">No data</div>`;
+    const keys = (b.keys || []).length ? `<div class="jd-keys">${b.keys.map((k) => `<span><i style="background:${k.color}"></i>${esc(k.label)}</span>`).join("")}</div>` : "";
+    return `<div class="jd-bars">${html}</div>${keys}`;
+  }
+
+  function lineHTML(b) {
+    const pts = b.points || [];
+    if (pts.length < 2) return `<div class="jd-csub">Not enough dated items to draw a trend.</div>`;
+    const W = 600, H = 210, pl = 30, pr = 12, pt = 14, pb = 28;
+    const max = Math.max(1, ...pts.map((p) => p.value));
+    const top = Math.ceil(max / 4) * 4 || 4;
+    const x = (i) => pl + (i * (W - pl - pr)) / (pts.length - 1);
+    const y = (v) => pt + (1 - v / top) * (H - pt - pb);
+    let d = `M${x(0)},${y(pts[0].value)}`;
+    for (let i = 0; i < pts.length - 1; i++) { // smooth curve
+      const x0 = x(i), y0 = y(pts[i].value), x1 = x(i + 1), y1 = y(pts[i + 1].value), cx = (x0 + x1) / 2;
+      d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`;
+    }
+    const grid = [0, 1, 2, 3, 4].map((g) => { const v = (top / 4) * g, yy = y(v); return `<line class="gl" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text x="${pl - 8}" y="${yy + 4}" text-anchor="end">${Math.round(v)}</text>`; }).join("");
+    const step = Math.ceil(pts.length / 8);
+    const xl = pts.map((p, i) => (i % step === 0 || i === pts.length - 1) ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>` : "").join("");
+    const dots = pts.map((p, i) => `<circle class="pt" cx="${x(i)}" cy="${y(p.value)}" r="4.5" data-tip="${esc(p.label)}: ${p.value}" style="animation-delay:${0.5 + i * 0.07}s"/>`).join("");
+    return `<div class="jd-line"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:auto;aspect-ratio:${W}/${H}"><defs><linearGradient id="jdArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--red)" stop-opacity=".35"/><stop offset="1" stop-color="var(--red)" stop-opacity="0"/></linearGradient></defs>${grid}${xl}<path class="ar" d="${d} L${x(pts.length - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="ln" d="${d}"/>${dots}</svg></div>`;
+  }
+
+  function animate(root) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      root.querySelectorAll(".seg").forEach((c) => {
+        const len = Number(c.dataset.len), gap = len > 99.9 ? 0 : Math.min(1.2, len / 3);
+        c.style.strokeDasharray = `${Math.max(len - gap, 0.01)} ${100 - Math.max(len - gap, 0.01)}`;
+      });
+      root.querySelectorAll(".fl").forEach((f) => { f.style.width = f.dataset.w + "%"; });
+      root.querySelectorAll(".jd-line .ln").forEach((p) => { const L = Math.ceil(p.getTotalLength()); p.style.setProperty("--len", L); });
+      root.querySelectorAll(".cu").forEach(countUp);
+    }));
+    // legend <-> slice hover link
+    root.querySelectorAll(".jd-donut").forEach((dn) => {
+      const set = (k, on) => { dn.querySelectorAll(`.seg[data-k="${k}"], .li[data-k="${k}"]`).forEach((e) => e.classList.toggle("hot", on)); };
+      dn.querySelectorAll(".seg, .li").forEach((e) => { e.addEventListener("mouseenter", () => set(e.dataset.k, true)); e.addEventListener("mouseleave", () => set(e.dataset.k, false)); });
+    });
+  }
+  function countUp(el) {
+    const to = Number(el.dataset.v) || 0;
+    if (matchMedia("(prefers-reduced-motion:reduce)").matches || to === 0) { el.textContent = to.toLocaleString(); return; }
+    const t0 = performance.now(), dur = 900;
+    const tick = (t) => { const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3); el.textContent = Math.round(to * e).toLocaleString(); if (p < 1) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+
+  // ---- wiring ---------------------------------------------------------------
+  let timer = null;
+  function refresh() { clearTimeout(timer); timer = setTimeout(renderSummary, 40); }
+  function init(c) {
+    cfg = c;
+    const go = () => {
+      build();
+      (cfg.patch || []).forEach((name) => {
+        const orig = window[name];
+        if (typeof orig !== "function") return;
+        window[name] = function () { const r = orig.apply(this, arguments); refresh(); return r; };
+      });
+      show(location.hash === "#detail" ? "detail" : "summary");
+      refresh();
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go); else go();
+  }
+  return { init, refresh, show, C, PAL };
+})();
+
+JazzShell.init({
+  title: "Compliance Dashboard",
+  patch: ["renderCurrentView"],
+  summary() {
+    const sessions = Object.values(fileSessions);
+    const briefs = sessions.flatMap((s) => getBriefsForSession(s));
+    const circ = sessions.flatMap((s) => getCircularBriefsForSession(s));
+    if (!briefs.length && !circ.length) return null;
+    const C = JazzShell.C, OPEN = C.open, CLOSED = C.closed, OK = C.ok;
+    const out = [];
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "0%");
+
+    if (briefs.length) {
+      const n = (s) => briefs.filter((b) => b.statusBadge === s).length;
+      const open = n("Open"), mixed = n("Mixed"), closed = n("Closed"), other = n("Other");
+      const depts = new Map();
+      briefs.forEach((b) => b.departments.forEach((d) => { const k = d.toLowerCase(); if (!depts.has(k)) depts.set(k, { label: d, o: 0, c: 0 }); const e = depts.get(k); if (b.statusBadge === "Closed") e.c++; else e.o++; }));
+      out.push({ kind: "section", title: "Briefs" });
+      out.push({ kind: "kpi", label: "Total Briefs", value: briefs.length, sub: `${sessions.length} file(s) loaded`, span: 3 });
+      out.push({ kind: "kpi", label: "Open / Mixed", value: open + mixed, sub: pct(open + mixed, briefs.length) + " of briefs", span: 3 });
+      out.push({ kind: "kpi", label: "Closed", value: closed, tone: "closed", sub: pct(closed, briefs.length) + " of briefs", span: 3 });
+      out.push({ kind: "kpi", label: "Departments involved", value: depts.size, tone: "ok", span: 3 });
+      out.push({ kind: "donut", title: "Open vs Closed", sub: "Status of every brief", center: "Briefs", span: 4,
+        segments: [{ label: "Open", value: open, color: OPEN }, { label: "Mixed", value: mixed, color: C.warn }, { label: "Closed", value: closed, color: CLOSED }, { label: "Other", value: other, color: OK }] });
+      out.push({ kind: "bars", title: "Briefs by department", sub: "Open vs closed — top 10", span: 8,
+        rows: [...depts.values()].sort((a, b) => b.o + b.c - (a.o + a.c)).slice(0, 10).map((d) => ({ label: d.label, parts: [{ label: "Open", value: d.o, color: OPEN }, { label: "Closed", value: d.c, color: CLOSED }] })),
+        keys: [{ label: "Open / Mixed / Other", color: OPEN }, { label: "Closed", color: CLOSED }] });
+      const tabs = new Map();
+      briefs.forEach((b) => { const e = tabs.get(b.sourceSheet) || { o: 0, c: 0 }; if (b.statusBadge === "Closed") e.c++; else e.o++; tabs.set(b.sourceSheet, e); });
+      out.push({ kind: "bars", title: "Briefs by tab", sub: "SO / SSO / Annexure / Appendix …", span: 6,
+        rows: [...tabs.entries()].map(([k, e]) => ({ label: k, parts: [{ label: "Open", value: e.o, color: OPEN }, { label: "Closed", value: e.c, color: CLOSED }] })),
+        keys: [{ label: "Open", color: OPEN }, { label: "Closed", color: CLOSED }] });
+      if (sessions.length > 1) {
+        const files = sessions.map((s) => { const bs = getBriefsForSession(s); const c = bs.filter((b) => b.statusBadge === "Closed").length; return { label: s.fileName, parts: [{ label: "Open", value: bs.length - c, color: OPEN }, { label: "Closed", value: c, color: CLOSED }] }; }).filter((r) => r.parts[0].value + r.parts[1].value > 0);
+        out.push({ kind: "bars", title: "Briefs by file", sub: "Open vs closed in each file", span: 6, rows: files });
+      }
+    }
+
+    if (circ.length) {
+      const needs = circ.filter((b) => b.needsAction).length, rel = circ.filter((b) => b.relevantToBranchless).length, mg = circ.filter((b) => b.hasManagementComments).length;
+      out.push({ kind: "section", title: "Circular requirements" });
+      out.push({ kind: "kpi", label: "Total Requirement Details", value: circ.length, span: 3 });
+      out.push({ kind: "kpi", label: "Relevant to Branchless", value: rel, sub: pct(rel, circ.length) + " of details", span: 3 });
+      out.push({ kind: "kpi", label: "Needs Action", value: needs, tone: "warn", sub: "No management comment, not compliant", span: 3 });
+      out.push({ kind: "kpi", label: "Has Management Comments", value: mg, tone: "ok", sub: pct(mg, circ.length) + " of details", span: 3 });
+      out.push({ kind: "donut", title: "Action needed", sub: "Details still waiting on a response", center: "Details", span: 4,
+        segments: [{ label: "Needs action", value: needs, color: OPEN }, { label: "No action needed", value: circ.length - needs, color: CLOSED }] });
+      out.push({ kind: "donut", title: "Management comments", sub: "Has a comment vs none", center: "Details", span: 4,
+        segments: [{ label: "Has comment", value: mg, color: OK }, { label: "No comment", value: circ.length - mg, color: OPEN }] });
+      out.push({ kind: "donut", title: "Relevant to Branchless", sub: "Branchless / BB Ops vs other teams", center: "Details", span: 4,
+        segments: [{ label: "Relevant", value: rel, color: OPEN }, { label: "Other", value: circ.length - rel, color: CLOSED }] });
+      const dc = new Map();
+      circ.forEach((b) => b.departments.forEach((d) => { const k = d.toLowerCase(); const e = dc.get(k) || { label: d, v: 0 }; e.v++; dc.set(k, e); }));
+      out.push({ kind: "bars", title: "Details by relevant department", sub: "How many requirements each team is named on — top 10", span: 12,
+        rows: [...dc.values()].sort((a, b) => b.v - a.v).slice(0, 10).map((d) => ({ label: d.label, parts: [{ label: "Details", value: d.v, color: OPEN }] })) });
+    }
+    return out;
+  },
+});
 
 </script>
 
