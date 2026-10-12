@@ -526,7 +526,333 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
 @keyframes jdEq{ 0%,100%{ height:10px; opacity:.5;} 50%{ height:44px; opacity:1;} }
 @media (prefers-reduced-motion:reduce){ .jd-eq i,.jd-loading .dots b{ animation:none; } }
 
+/* ===== Jazz Dash — priority tags (see jd_priority.js for how it works) ===== */
+:root{ --jp1:#E5383B; --jp2:#F97316; --jp3:#3B82F6; --jp4:#8B95A7; --jp0:#6B7280; }
+:root[data-theme="light"]{ --jp4:#64748B; }
+/* each level just sets one colour variable, everything else reuses it */
+.p1{ --jc:var(--jp1); } .p2{ --jc:var(--jp2); } .p3{ --jc:var(--jp3); } .p4{ --jc:var(--jp4); } .p0{ --jc:var(--jp0); }
+
+/* little coloured dot used in the button, menu and filter chips */
+.jp-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--jc,var(--jp0)); flex:none; box-shadow:0 0 0 3px color-mix(in srgb,var(--jc,var(--jp0)) 22%,transparent); }
+.jp-opt.p0 .jp-dot, .jp-btn.p0 .jp-dot{ background:transparent; box-shadow:inset 0 0 0 2px var(--jp0); }
+
+/* tag on the collapsed row */
+.jp-tag{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px 2px 7px; border-radius:100px; font:600 11.5px 'IBM Plex Sans',sans-serif; color:var(--jc); background:color-mix(in srgb,var(--jc) 14%,transparent); border:1px solid color-mix(in srgb,var(--jc) 45%,transparent); animation:jpPop .35s cubic-bezier(.2,.9,.3,1.3) both; }
+.jp-tag .jp-flag{ width:12px; height:12px; }
+@keyframes jpPop{ from{ transform:scale(.6); opacity:0; } to{ transform:none; opacity:1; } }
+
+/* the picker row inside an expanded card */
+.jp-pick{ position:relative; display:flex; align-items:center; gap:12px; margin:0 0 14px; flex-wrap:wrap; }
+.jp-label{ font:600 11px 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; color:var(--text-lo); }
+.jp-btn{ display:inline-flex; align-items:center; gap:9px; padding:8px 12px 8px 12px; border-radius:100px; cursor:pointer; color:var(--text-hi); font:600 13px 'IBM Plex Sans',sans-serif;
+  background:color-mix(in srgb,var(--jc,var(--jp0)) 10%,transparent); border:1px solid color-mix(in srgb,var(--jc,var(--jp0)) 45%,var(--line));
+  transition:transform .2s, box-shadow .2s, border-color .2s, background .2s; }
+.jp-btn:hover{ transform:translateY(-1px); box-shadow:0 6px 16px color-mix(in srgb,var(--jc,var(--jp0)) 28%,transparent); }
+.jp-btn:active{ transform:scale(.97); }
+.jp-chev{ transition:transform .28s cubic-bezier(.3,.9,.3,1.2); opacity:.75; }
+.jp-pick.open .jp-chev{ transform:rotate(180deg); }
+.jp-pick.open .jp-btn{ border-color:var(--jc,var(--red)); }
+
+/* the dropdown: fades + slides in, and each option staggers in after the last */
+.jp-menu{ position:absolute; z-index:60; top:calc(100% + 6px); left:62px; min-width:196px; padding:6px; border-radius:14px; background:var(--ink-800,#1E1815); border:1px solid var(--line); box-shadow:0 18px 40px rgba(0,0,0,.38);
+  opacity:0; transform:translateY(-8px) scale(.96); transform-origin:top left; pointer-events:none; visibility:hidden; transition:opacity .18s, transform .22s cubic-bezier(.2,.9,.3,1.2), visibility 0s .22s; }
+.jp-pick.up .jp-menu{ top:auto; bottom:calc(100% + 6px); transform-origin:bottom left; transform:translateY(8px) scale(.96); }
+.jp-pick.open .jp-menu{ opacity:1; transform:none; pointer-events:auto; visibility:visible; transition:opacity .18s, transform .22s cubic-bezier(.2,.9,.3,1.2); }
+.jp-opt{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:9px 12px; border:0; border-radius:9px; background:transparent; color:var(--text-hi); font:500 13.5px 'IBM Plex Sans',sans-serif; cursor:pointer; opacity:0; transform:translateX(-6px); transition:background .15s, padding-left .15s; }
+.jp-pick.open .jp-opt{ opacity:1; transform:none; transition:opacity .22s calc(var(--n)*35ms + 60ms), transform .22s calc(var(--n)*35ms + 60ms), background .15s, padding-left .15s; }
+.jp-opt:hover{ background:color-mix(in srgb,var(--jc,var(--jp0)) 16%,transparent); padding-left:16px; }
+.jp-opt:hover .jp-dot{ transform:scale(1.3); } .jp-dot{ transition:transform .18s; }
+.jp-oname{ flex:1; } .jp-ck{ color:var(--jc,var(--text-lo)); opacity:0; transform:scale(.5); transition:opacity .2s, transform .2s; }
+.jp-opt.on{ font-weight:700; } .jp-opt.on .jp-ck{ opacity:1; transform:none; }
+
+/* filter chips: a coloured dot in front of the normal chip look */
+.jp-chip{ display:inline-flex; align-items:center; gap:7px; }
+.jp-chip.active{ border-color:var(--jc); }
+.jp-empty-note{ color:var(--text-lo); font-size:12.5px; }
+
+/* cards need to let the dropdown hang outside their edge */
+details.brief-card, details.obs, .brief-detail, .obs-detail, .tab-body, .sev-body{ overflow:visible; }
+@media (prefers-reduced-motion:reduce){ .jp-menu,.jp-opt,.jp-tag{ transition:none !important; animation:none !important; } }
+
 </style>
+<script>
+/* =============================================================================
+   JAZZ DASH — PRIORITY TAGS  (shared by every dashboard)
+   =============================================================================
+
+   WHAT THIS DOES (in plain English)
+   ---------------------------------
+   Every row in a dashboard (an issue, a brief, an observation …) can be given
+   a priority: 1st, 2nd, 3rd or 4th Priority — or "None".
+
+   • The priority lives ONLY inside this browser. Nothing is ever written to
+     the Excel file or to Google Drive.
+   • So the dashboard can "remember" it later, we save it in the browser's own
+     small notebook called localStorage (it survives closing the tab and
+     restarting the computer; it is lost only if you clear the browser's
+     site data, or use a different browser / computer).
+
+   HOW A ROW IS RECOGNISED  (the clever bit)
+   -----------------------------------------
+   We do NOT remember "row 7 of file X". If somebody replaces the Excel file
+   with a newer version, row numbers shift and that would break everything.
+   Instead we remember the CONTENT of the row:
+
+        row text  ->  tidy it up  ->  turn it into a short fingerprint  ->  save
+        "Cash-out limits are not reviewed."      (lower-case, no punctuation,
+                                                  single spaces)
+        "cash out limits are not reviewed"   ->  fingerprint "k3f9x1a7q2"
+        notebook:  { "k3f9x1a7q2": 2 }          (2 = 2nd Priority)
+
+   When a file is opened again — even a changed copy — each row's text is
+   tidied and fingerprinted the same way. If the fingerprint is already in the
+   notebook, the row simply gets its old priority back. Rows whose text did not
+   change keep their priority; a row whose wording changed is treated as a new
+   row (it starts with no priority). Capital letters, extra spaces and
+   punctuation differences are ignored, so cosmetic edits do not lose it.
+
+   Each dashboard has its OWN notebook (a "namespace" such as "risk"), so a
+   priority set in the Risk dashboard never leaks into the Audit dashboard.
+
+   WHAT THE DASHBOARDS CALL  (the public toolbox — see the bottom of the file)
+   --------------------------------------------------------------------------
+     JazzPriority.init(ns, onChange)   choose the notebook + say what to redraw
+     JazzPriority.get(text)            -> 0 (none) … 4
+     JazzPriority.tagHTML(text)        small coloured tag for the collapsed row
+     JazzPriority.pickerHTML(text)     the animated dropdown for the open row
+     JazzPriority.renderFilter(...)    the "filter by priority" chips
+     JazzPriority.matches(text, f)     does a row pass the chosen filter?
+     JazzPriority.summaryBlocks(...)   the charts/cards for the Summary page
+
+   ADDING PRIORITY TO A FUTURE DASHBOARD  (3 steps)
+   ------------------------------------------------
+     1. Call JazzPriority.init("my-dashboard", () => renderTheView()) once.
+     2. In the row's HTML: put JazzPriority.tagHTML(row.text) among the badges
+        and JazzPriority.pickerHTML(row.text) inside the expanded part.
+     3. Add a filter container, call JazzPriority.renderFilter(...) when you
+        draw your filters, and use JazzPriority.matches(...) in your filter
+        function. For the Summary page add ...JazzPriority.summaryBlocks(...).
+   ========================================================================== */
+const JazzPriority = (() => {
+  "use strict";
+
+  // ---- the four levels (and their colours; the CSS file uses the same numbers)
+  const LEVELS = [
+    { v: 1, name: "1st Priority", short: "1st", color: "#E5383B" }, // red    — most urgent
+    { v: 2, name: "2nd Priority", short: "2nd", color: "#F97316" }, // orange
+    { v: 3, name: "3rd Priority", short: "3rd", color: "#3B82F6" }, // blue
+    { v: 4, name: "4th Priority", short: "4th", color: "#8B95A7" }, // grey   — least urgent
+  ];
+  const NONE_COLOR = "#6B7280";
+  const nameOf = (v) => (v ? LEVELS[v - 1].name : "No priority");
+
+  // ---- state ---------------------------------------------------------------
+  let ns = "default";        // which notebook we are using (e.g. "risk")
+  let redraw = () => {};     // what to call after a priority changes
+  let notebook = null;       // the loaded notebook: { fingerprint: 1..4 }
+  let canSave = true;        // false if the browser blocks localStorage
+
+  const storageKey = () => "jazzdash.priorities." + ns;
+
+  // ---- 1) tidy the text and turn it into a fingerprint ---------------------
+  // Tidying: lower-case, replace everything that is not a letter or digit with
+  // a space, squash repeated spaces. So "Cash-out  Limits!" == "cash out limits".
+  function tidy(text) {
+    return String(text == null ? "" : text)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  }
+  // Fingerprint ("hash"): a short code that is always the same for the same
+  // text, and (practically) never the same for different texts. This is the
+  // well-known public-domain "cyrb53" recipe; it keeps the notebook small
+  // because we store ~11 characters instead of a whole paragraph.
+  function fingerprint(tidyText) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < tidyText.length; i++) {
+      const ch = tidyText.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+  // text  ->  fingerprint.  Empty text has no fingerprint (can't be tagged).
+  function keyOf(text) {
+    const t = tidy(text);
+    return t ? fingerprint(t) : "";
+  }
+
+  // ---- 2) the notebook (load / save) ---------------------------------------
+  function load() {
+    if (notebook) return notebook;
+    notebook = {};
+    try {
+      const raw = localStorage.getItem(storageKey());
+      if (raw) notebook = (JSON.parse(raw) || {}).p || {};
+    } catch (e) { canSave = false; } // blocked storage or damaged data: start empty
+    return notebook;
+  }
+  function save() {
+    try { localStorage.setItem(storageKey(), JSON.stringify({ v: 1, p: notebook })); canSave = true; }
+    catch (e) { canSave = false; console.warn("Priorities could not be saved in this browser:", e); }
+  }
+
+  // ---- 3) read / write one row's priority ----------------------------------
+  function getByKey(key) { return key ? load()[key] || 0 : 0; }
+  function get(text) { return getByKey(keyOf(text)); }
+  function setByKey(key, p) {
+    if (!key) return;
+    const nb = load();
+    p = Number(p) || 0;
+    if (p >= 1 && p <= 4) nb[key] = p; else delete nb[key]; // "None" = forget it
+    save();
+    redraw(); // let the dashboard refresh its rows, filters and summary
+  }
+
+  // ---- 4) HTML pieces -------------------------------------------------------
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const CHEV = '<svg class="jp-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+  const CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>';
+  const FLAG = '<svg class="jp-flag" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 3h2v18H5zM8 4h11l-3 4 3 4H8z"/></svg>';
+
+  // Small coloured tag shown on the collapsed row. Nothing if no priority set.
+  function tagHTML(text) {
+    const p = get(text);
+    if (!p) return "";
+    return `<span class="jp-tag p${p}" title="${nameOf(p)}">${FLAG}${nameOf(p)}</span>`;
+  }
+
+  // The "Priority" button + animated dropdown for the expanded row.
+  function pickerHTML(text) {
+    const key = keyOf(text);
+    if (!key) return "";
+    const p = getByKey(key);
+    const opts = [0, 1, 2, 3, 4].map((v, i) => `
+      <button type="button" class="jp-opt p${v}${v === p ? " on" : ""}" role="option" data-jp-set="${v}" style="--n:${i}">
+        <i class="jp-dot"></i><span class="jp-oname">${v ? nameOf(v) : "None"}</span><span class="jp-ck">${CHECK}</span>
+      </button>`).join("");
+    return `<div class="jp-pick" data-jp="${key}">
+      <span class="jp-label">Priority</span>
+      <button type="button" class="jp-btn p${p}" aria-haspopup="listbox" aria-expanded="false" title="Set the priority of this item (saved in this browser only)">
+        <i class="jp-dot"></i><span class="jp-name">${p ? nameOf(p) : "Set priority"}</span>${CHEV}
+      </button>
+      <div class="jp-menu" role="listbox">${opts}</div>
+    </div>`;
+  }
+
+  // ---- 5) clicks (one listener for the whole page) -------------------------
+  // The rows are redrawn often, so instead of attaching a listener to every
+  // button we attach ONE listener to the page and look at what was clicked.
+  function closeAll(except) {
+    document.querySelectorAll(".jp-pick.open").forEach((el) => {
+      if (el === except) return;
+      el.classList.remove("open");
+      const b = el.querySelector(".jp-btn"); if (b) b.setAttribute("aria-expanded", "false");
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    const opt = t.closest && t.closest(".jp-opt");
+    if (opt) {                                            // chose an item in the menu
+      e.preventDefault(); e.stopPropagation();
+      const pick = opt.closest(".jp-pick");
+      setByKey(pick.getAttribute("data-jp"), opt.getAttribute("data-jp-set"));
+      return;
+    }
+    const btn = t.closest && t.closest(".jp-btn");
+    if (btn) {                                            // opened / closed the menu
+      e.preventDefault(); e.stopPropagation();
+      const pick = btn.closest(".jp-pick");
+      const willOpen = !pick.classList.contains("open");
+      closeAll(pick);
+      if (willOpen) {
+        // open upwards when there is not enough room underneath
+        const room = window.innerHeight - btn.getBoundingClientRect().bottom;
+        pick.classList.toggle("up", room < 280);
+      }
+      pick.classList.toggle("open", willOpen);
+      btn.setAttribute("aria-expanded", String(willOpen));
+      return;
+    }
+    closeAll(null);                                       // clicked anywhere else: close
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(null); });
+  // If another tab changes priorities, pick the change up here too.
+  window.addEventListener("storage", (e) => {
+    if (e.key === storageKey()) { notebook = null; redraw(); }
+  });
+
+  // ---- 6) filtering ---------------------------------------------------------
+  // `f` is the chosen filter: null (all), 1…4, or "none" (rows with no priority)
+  function matches(text, f) {
+    if (f == null || f === "") return true;
+    const p = get(text);
+    return f === "none" ? p === 0 : p === Number(f);
+  }
+  // Draws the chips into `el`. `texts` = the text of every row that could be
+  // shown (so the chips can show counts); `active` = current choice;
+  // `onPick(newChoice)` is called when a chip is clicked (click again = clear).
+  function renderFilter(el, texts, active, onPick) {
+    if (!el) return;
+    const counts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
+    texts.forEach((t) => counts[get(t)]++);
+    const defs = [1, 2, 3, 4, "none"];
+    el.innerHTML = defs.map((d) => {
+      const n = d === "none" ? counts[0] : counts[d];
+      const isActive = String(active) === String(d);
+      if (!n && !isActive) return "";                      // hide empty buckets
+      const cls = d === "none" ? "p0" : "p" + d;
+      return `<button type="button" class="chip jp-chip ${cls}${isActive ? " active" : ""}" data-jp-f="${d}"><i class="jp-dot"></i>${d === "none" ? "No priority" : nameOf(d)} <span class="count">${n}</span></button>`;
+    }).join("") || `<span class="jp-empty-note">Set a priority on any row (open it and use the Priority button) and it will show up here.</span>`;
+    el.querySelectorAll("[data-jp-f]").forEach((b) => b.addEventListener("click", () => {
+      const v = b.getAttribute("data-jp-f");
+      onPick(String(active) === v ? null : (v === "none" ? "none" : Number(v)));
+    }));
+  }
+
+  // ---- 7) Summary-page blocks ----------------------------------------------
+  // list : [{ text, cat }]  — one entry per row; `cat` is the row's own status
+  //        key (e.g. "overdue") so we can split each priority by status.
+  // opt  : { section, catDefs:[{key,label,color}], barsTitle, barsSub, noun }
+  // Returns "blocks" in the format the Summary page (jd_shell.js) understands.
+  function summaryBlocks(list, opt) {
+    const o = opt || {};
+    const total = list.length;
+    if (!total) return [];
+    const by = { 0: [], 1: [], 2: [], 3: [], 4: [] };
+    list.forEach((r) => by[get(r.text)].push(r));
+    const pct = (n) => Math.round((n / total) * 100) + "%";
+    const noun = o.noun || "items";
+    const out = [{ kind: "section", title: o.section || "Priority" }];
+    LEVELS.forEach((L) => out.push({ kind: "kpi", label: L.name, value: by[L.v].length, color: L.color, sub: pct(by[L.v].length) + " of " + noun, span: 3 }));
+    out.push({
+      kind: "donut", title: "Priority mix", sub: "How the " + noun + " are ranked", center: noun.charAt(0).toUpperCase() + noun.slice(1), span: 4,
+      segments: LEVELS.map((L) => ({ label: L.name, value: by[L.v].length, color: L.color })).concat([{ label: "No priority", value: by[0].length, color: NONE_COLOR }]),
+    });
+    const defs = o.catDefs || [];
+    out.push({
+      kind: "bars", title: o.barsTitle || "Priority by status", sub: o.barsSub || "Where each priority level stands (items with a priority only)", span: 8,
+      rows: [1, 2, 3, 4].map((v) => ({
+        label: nameOf(v),
+        parts: defs.map((d) => ({ label: d.label, value: by[v].filter((r) => r.cat === d.key).length, color: d.color })),
+      })),
+      keys: defs.map((d) => ({ label: d.label, color: d.color })),
+    });
+    return out;
+  }
+
+  // ---- 8) public toolbox ----------------------------------------------------
+  function init(namespace, onChange) {
+    ns = namespace || "default";
+    redraw = typeof onChange === "function" ? onChange : () => {};
+    notebook = null; // force a fresh load for this namespace
+  }
+  return { init, get, tagHTML, pickerHTML, matches, renderFilter, summaryBlocks, LEVELS, nameOf };
+})();
+
+</script>
 </head>
 <body>
 
@@ -582,6 +908,9 @@ footer{margin-top:36px; padding-top:14px; border-top:1px solid var(--line); font
 
       <div class="filter-label">FILTER BY STATUS / DUE</div>
       <div class="chip-row" id="dueChips"></div>
+      <!-- PRIORITY filter: chips are drawn by JazzPriority.renderFilter() -->
+      <div class="filter-label">FILTER BY PRIORITY</div>
+      <div class="chip-row" id="priorityChips"></div>
 
       <!-- Only meaningful (and only shown) in "All files in folder" view. -->
       <div id="sourceFilterWrap" style="display:none;">
@@ -1171,7 +1500,7 @@ function activeState() { return viewMode === "combined" ? combinedState : state;
 
 function freshFilterState() {
   return {
-    owner: null, due: null, source: null, query: "",
+    owner: null, due: null, source: null, priority: null, query: "",
     openTabs: new Set(), openItems: new Set(),
   };
 }
@@ -1179,7 +1508,13 @@ function freshFilterState() {
 let state = freshFilterState();          // "This file" view's filters
 let combinedState = freshFilterState();  // "All files" view's filters
 
+// PRIORITY: tell the shared priority module which notebook to use ("risk")
+// and what to redraw when a priority changes. The priority is remembered by
+// the issue's TITLE text, never by row number — see jd_priority.js.
+JazzPriority.init("risk", () => renderCurrentView());
+
 function matchesFilters(item, st) {
+  if (!JazzPriority.matches(item.title, st.priority)) return false; // priority chip
   if (st.owner && item.owner.toLowerCase() !== st.owner.toLowerCase()) return false;
   if (st.due && item.dueStatus !== st.due) return false;
   if (st.source && item.sourceFile !== st.source) return false;
@@ -1226,15 +1561,19 @@ function renderCurrentView() {
   // Cross-filtering: owner chips only list owners that have issues in the
   // selected status/due bucket; status/due chips only list the buckets that
   // the selected owner actually has. Counts follow the same rule.
-  const ownerPool = st.due ? items.filter((i) => i.dueStatus === st.due) : items;
-  const duePool = st.owner ? items.filter((i) => i.owner.toLowerCase() === st.owner.toLowerCase()) : items;
+  const byPri = (i) => JazzPriority.matches(i.title, st.priority);
+  const ownerPool = items.filter((i) => (!st.due || i.dueStatus === st.due) && byPri(i));
+  const duePool = items.filter((i) => (!st.owner || i.owner.toLowerCase() === st.owner.toLowerCase()) && byPri(i));
+  // Priority chips count the issues that pass every OTHER filter.
+  const priPool = items.filter((i) => matchesFilters(i, { ...st, priority: null }));
+  JazzPriority.renderFilter(document.getElementById("priorityChips"), priPool.map((i) => i.title), st.priority, (v) => { st.priority = v; renderCurrentView(); });
   renderOwnerChips(ownerPool, st);
   renderDueChips(duePool, st);
   document.getElementById("sourceFilterWrap").style.display = isCombined ? "" : "none";
   if (isCombined) renderSourceChips(items, st);
   renderGroups(items, st);
 
-  const hasFilter = st.owner || st.due || st.source || st.query;
+  const hasFilter = st.owner || st.due || st.source || st.priority || st.query;
   document.getElementById("clearFiltersBtn").style.display = hasFilter ? "" : "none";
   document.getElementById("searchBox").value = st.query;
 }
@@ -1383,6 +1722,9 @@ function renderIssueCard(item, i, ctx) {
   if (!item.targetDate && !item.isClosed) {
     badges.push(`<span class="badge status-Open">No target date · over due</span>`);
   }
+  // PRIORITY tag (1st–4th) — shows only when one has been set
+  const priTag = JazzPriority.tagHTML(item.title);
+  if (priTag) badges.unshift(priTag);
   if (item.owner) {
     badges.push(`<span class="badge dept-${ownerIdx >= 0 ? ownerIdx % 6 : 0}">${esc(item.owner)}</span>`);
   }
@@ -1403,6 +1745,7 @@ function renderIssueCard(item, i, ctx) {
       <span class="chev brief-chev"></span>
     </summary>
     <div class="brief-detail">
+      ${JazzPriority.pickerHTML(item.title)}
       <div class="detail-block">
         <span class="detail-label">Issue Description</span>
         ${esc(item.descriptionFull) || "—"}
@@ -1441,7 +1784,7 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 });
 document.getElementById("clearFiltersBtn").addEventListener("click", () => {
   const st = activeState();
-  st.owner = null; st.due = null; st.source = null; st.query = "";
+  st.owner = null; st.due = null; st.source = null; st.priority = null; st.query = "";
   renderCurrentView();
 });
 document.getElementById("toggleAllBtn").addEventListener("click", (e) => {
@@ -1857,7 +2200,7 @@ const JazzShell = (() => {
       const span = `jd-span-${b.span || (b.kind === "kpi" ? 3 : 6)}`;
       const head = b.title ? `<h3 class="jd-ctitle">${esc(b.title)}</h3>${b.sub ? `<p class="jd-csub">${esc(b.sub)}</p>` : ""}` : "";
       let body = "";
-      if (b.kind === "kpi") body = `<div class="jd-kpi-head"><span class="jd-sq ${b.tone ? "t-" + b.tone : ""}"></span>${esc(b.label)}</div><div class="jd-kpi-val cu" data-v="${Number(b.value) || 0}">0</div>${b.sub ? `<div class="jd-kpi-sub">${esc(b.sub)}</div>` : ""}`;
+      if (b.kind === "kpi") body = `<div class="jd-kpi-head"><span class="jd-sq ${b.tone ? "t-" + b.tone : ""}"${b.color ? ` style="background:${b.color}"` : ""}></span>${esc(b.label)}</div><div class="jd-kpi-val cu" data-v="${Number(b.value) || 0}">0</div>${b.sub ? `<div class="jd-kpi-sub">${esc(b.sub)}</div>` : ""}`;
       else if (b.kind === "donut") body = head + donutHTML(b);
       else if (b.kind === "bars") body = head + barsHTML(b);
       else if (b.kind === "line") body = head + lineHTML(b);
@@ -2010,6 +2353,13 @@ JazzShell.init({
     });
     out.push({ kind: "bars", title: "How overdue are they?", sub: "Open issues past their target date", span: 6,
       rows: ageB.map(([k, v], n) => ({ label: k, parts: [{ label: k, value: v, color: n === 0 ? CLOSED : OVER }] })) });
+    // PRIORITY section: cards, mix chart and "priority by due status" bars.
+    // `scope` (a single file, or all) has already been applied to `items`.
+    out.push(...JazzPriority.summaryBlocks(
+      items.map((i) => ({ text: i.title, cat: i.dueStatus })),
+      { section: "Priority", noun: "issues", barsTitle: "Priority by due status", barsSub: "Are the most urgent issues the overdue ones?",
+        catDefs: [{ key: "overdue", label: "Over Due", color: OVER }, { key: "indue", label: "In Due", color: INDUE }, { key: "closed", label: "Closed", color: CLOSED }] }
+    ));
     return out;
     function sum(r) { return r.parts.reduce((a, p) => a + p.value, 0); }
     function pct(a, b) { return b ? Math.round((a / b) * 100) + "%" : "0%"; }
