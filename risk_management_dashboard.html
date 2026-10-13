@@ -308,7 +308,21 @@ h1{font-family:'Source Serif 4', serif; font-weight:600; font-size:clamp(22px,4v
 }
 .del-btn:hover, .del-btn:focus-visible{background:var(--red); border-color:var(--red); color:#fff; outline:none;}
 .del-btn svg{flex:none;}
-@media (max-width:560px){ .del-btn span{display:none;} .del-btn{padding:7px;} }
+@media (max-width:560px){ .close-btn span{display:none;} .close-btn{padding:7px;} }
+/* CLOSE button (collapsed row, open issues only) — green so it reads as "done" */
+.close-btn{
+  flex:none; align-self:flex-start; display:inline-flex; align-items:center; gap:6px;
+  font-family:'IBM Plex Sans', sans-serif; font-size:12px; font-weight:600; line-height:1;
+  padding:6px 11px; border-radius:100px; cursor:pointer;
+  color:#2FA36B; background:transparent; border:1px solid #2FA36B;
+  transition:background .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.close-btn:hover, .close-btn:focus-visible{background:#2FA36B; color:#fff; outline:none; transform:translateY(-1px); box-shadow:0 6px 14px rgba(47,163,107,.35);}
+.close-btn svg{flex:none; transition:transform .25s ease;} .close-btn:hover svg{transform:scale(1.2) rotate(-8deg);}
+.close-btn:disabled{opacity:.5; cursor:wait;}
+/* Delete now lives inside the expanded card, in the actions row */
+.brief-detail .row-actions-risk{display:flex; justify-content:flex-end; margin-top:14px;}
+.brief-detail .del-btn{align-self:auto;}
 .brief-chev{width:8px; height:8px; border-right:1.5px solid var(--text-lo); border-bottom:1.5px solid var(--text-lo); transform:rotate(45deg); flex:none; margin-top:5px; transition:transform .15s ease;}
 .brief-card[open] .brief-chev{transform:rotate(-135deg);}
 
@@ -1737,11 +1751,11 @@ function renderIssueCard(item, i, ctx) {
         <div class="brief-preview">${esc(item.title)}</div>
         <div class="badges">${badges.join("")}</div>
       </div>
-      <button type="button" class="del-btn" title="Delete this issue (also removes the row from the Excel file)" aria-label="Delete this issue"
-        data-del-file="${esc(item.sourceFile)}" data-del-sheet="${esc(item.sourceSheet)}" data-del-row="${item.rowIndex}">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
-        <span>Delete</span>
-      </button>
+      ${item.isClosed ? "" : `<button type="button" class="close-btn" title="Mark this issue as Closed (also sets Status to Closed in the Excel file)" aria-label="Close this issue"
+        data-close-file="${esc(item.sourceFile)}" data-close-sheet="${esc(item.sourceSheet)}" data-close-row="${item.rowIndex}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>
+        <span>Close</span>
+      </button>`}
       <span class="chev brief-chev"></span>
     </summary>
     <div class="brief-detail">
@@ -1749,6 +1763,14 @@ function renderIssueCard(item, i, ctx) {
       <div class="detail-block">
         <span class="detail-label">Issue Description</span>
         ${esc(item.descriptionFull) || "—"}
+      </div>
+      <!-- Delete only appears here, once the card is expanded -->
+      <div class="row-actions-risk">
+        <button type="button" class="del-btn" title="Delete this issue (also removes the row from the Excel file)" aria-label="Delete this issue"
+          data-del-file="${esc(item.sourceFile)}" data-del-sheet="${esc(item.sourceSheet)}" data-del-row="${item.rowIndex}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
+          <span>Delete</span>
+        </button>
       </div>
     </div>
   </details>`;
@@ -1768,6 +1790,14 @@ function wireGroupInteractions(container, st) {
       e.preventDefault();
       e.stopPropagation();
       deleteItem(btn.getAttribute("data-del-file"), btn.getAttribute("data-del-sheet"), Number(btn.getAttribute("data-del-row")));
+    });
+  });
+  container.querySelectorAll(".close-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      // The button sits inside <summary>; stop the click from also expanding the card.
+      e.preventDefault();
+      e.stopPropagation();
+      closeItem(btn.getAttribute("data-close-file"), btn.getAttribute("data-close-sheet"), Number(btn.getAttribute("data-close-row")), btn);
     });
   });
   container.querySelectorAll(".brief-card").forEach((det) => {
@@ -1851,6 +1881,36 @@ async function deleteItem(sourceFile, sourceSheet, rowIndex) {
   // Row numbers after the deleted one just shifted, and card ids are built
   // from row numbers — forget which cards were open rather than reopen the wrong ones.
   state.openItems.clear(); combinedState.openItems.clear();
+  await saveSession(session);
+  renderSwitchList();
+  renderCurrentView();
+}
+
+// CLOSE — sets the issue's Status cell to "Closed" in the Excel file (and in
+// the dashboard). If the sheet has no Status column at all, one is added on
+// the right so the "Closed" has somewhere to live. The row stays where it is
+// (nothing is deleted); it simply moves into the "Closed" count/filter.
+async function closeItem(sourceFile, sourceSheet, rowIndex, btn) {
+  const session = fileSessions[sourceFile];
+  if (!session) return;
+  const item = getItemsForSession(session).find((i) => i.sourceSheet === sourceSheet && i.rowIndex === rowIndex);
+  if (!item || item.isClosed) return;
+  if (!confirm(`Mark this issue as Closed?\n\n${item.title}\n\nThe Status cell in "${sourceFile}" will be set to "Closed".`)) return;
+  if (btn) btn.disabled = true;
+  const tab = session.tabs[sourceSheet];
+  const ws = session.worksheets[sourceSheet];
+  const L = tab.layout;
+  let col = L.status;
+  if (col < 0) {                         // no Status column yet: add one at the far right
+    col = Math.max(...tab.rows.map((r) => (r ? r.length : 0)));
+    tab.rows[0][col] = "Status";
+    if (ws) ws.getCell(1, col + 1).value = "Status";
+    L.status = col;
+  }
+  while (tab.rows[rowIndex].length <= col) tab.rows[rowIndex].push(null);
+  tab.rows[rowIndex][col] = "Closed";    // dashboard copy
+  if (ws) ws.getCell(rowIndex + 1, col + 1).value = "Closed"; // Excel copy (worksheet is 1-based)
+  state.openItems.add(item.id); combinedState.openItems.add(item.id);
   await saveSession(session);
   renderSwitchList();
   renderCurrentView();
