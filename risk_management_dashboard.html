@@ -577,15 +577,15 @@ details.brief-card, details.obs, .brief-detail, .obs-detail, .tab-body, .sev-bod
 </style>
 <script>
 /* =============================================================================
-   JAZZ DASH — PRIORITY TAGS  (shared by every dashboard)
+   JAZZ DASH — ACTION LEVEL TAGS  (shared by every dashboard)
    =============================================================================
 
    WHAT THIS DOES (in plain English)
    ---------------------------------
    Every row in a dashboard (an issue, a brief, an observation …) can be given
-   a priority: 1st, 2nd, 3rd or 4th Priority — or "None".
+   an action level: Action level 1, 2, 3 or 4 — or "None".
 
-   • The priority lives ONLY inside this browser. Nothing is ever written to
+   • The action level lives ONLY inside this browser. Nothing is ever written to
      the Excel file or to Google Drive.
    • So the dashboard can "remember" it later, we save it in the browser's own
      small notebook called localStorage (it survives closing the tab and
@@ -602,17 +602,17 @@ details.brief-card, details.obs, .brief-detail, .obs-detail, .tab-body, .sev-bod
         "Cash-out limits are not reviewed."      (lower-case, no punctuation,
                                                   single spaces)
         "cash out limits are not reviewed"   ->  fingerprint "k3f9x1a7q2"
-        notebook:  { "k3f9x1a7q2": 2 }          (2 = 2nd Priority)
+        notebook:  { "k3f9x1a7q2": 2 }          (2 = Action level 2)
 
    When a file is opened again — even a changed copy — each row's text is
    tidied and fingerprinted the same way. If the fingerprint is already in the
-   notebook, the row simply gets its old priority back. Rows whose text did not
-   change keep their priority; a row whose wording changed is treated as a new
-   row (it starts with no priority). Capital letters, extra spaces and
+   notebook, the row simply gets its old action level back. Rows whose text did not
+   change keep their action level; a row whose wording changed is treated as a new
+   row (it starts with no action level). Capital letters, extra spaces and
    punctuation differences are ignored, so cosmetic edits do not lose it.
 
    Each dashboard has its OWN notebook (a "namespace" such as "risk"), so a
-   priority set in the Risk dashboard never leaks into the Audit dashboard.
+   action level set in the Risk dashboard never leaks into the Audit dashboard.
 
    WHAT THE DASHBOARDS CALL  (the public toolbox — see the bottom of the file)
    --------------------------------------------------------------------------
@@ -620,11 +620,11 @@ details.brief-card, details.obs, .brief-detail, .obs-detail, .tab-body, .sev-bod
      JazzPriority.get(text)            -> 0 (none) … 4
      JazzPriority.tagHTML(text)        small coloured tag for the collapsed row
      JazzPriority.pickerHTML(text)     the animated dropdown for the open row
-     JazzPriority.renderFilter(...)    the "filter by priority" chips
+     JazzPriority.renderFilter(...)    the "filter by action level" chips
      JazzPriority.matches(text, f)     does a row pass the chosen filter?
      JazzPriority.summaryBlocks(...)   the charts/cards for the Summary page
 
-   ADDING PRIORITY TO A FUTURE DASHBOARD  (3 steps)
+   ADDING ACTION LEVEL TO A FUTURE DASHBOARD  (3 steps)
    ------------------------------------------------
      1. Call JazzPriority.init("my-dashboard", () => renderTheView()) once.
      2. In the row's HTML: put JazzPriority.tagHTML(row.text) among the badges
@@ -638,17 +638,17 @@ const JazzPriority = (() => {
 
   // ---- the four levels (and their colours; the CSS file uses the same numbers)
   const LEVELS = [
-    { v: 1, name: "1st Priority", short: "1st", color: "#E5383B" }, // red    — most urgent
-    { v: 2, name: "2nd Priority", short: "2nd", color: "#F97316" }, // orange
-    { v: 3, name: "3rd Priority", short: "3rd", color: "#3B82F6" }, // blue
-    { v: 4, name: "4th Priority", short: "4th", color: "#8B95A7" }, // grey   — least urgent
+    { v: 1, name: "Action level 1", short: "L1", color: "#E5383B" }, // red    — most urgent
+    { v: 2, name: "Action level 2", short: "L2", color: "#F97316" }, // orange
+    { v: 3, name: "Action level 3", short: "L3", color: "#3B82F6" }, // blue
+    { v: 4, name: "Action level 4", short: "L4", color: "#8B95A7" }, // grey   — least urgent
   ];
   const NONE_COLOR = "#6B7280";
-  const nameOf = (v) => (v ? LEVELS[v - 1].name : "No priority");
+  const nameOf = (v) => (v ? LEVELS[v - 1].name : "No action level");
 
   // ---- state ---------------------------------------------------------------
   let ns = "default";        // which notebook we are using (e.g. "risk")
-  let redraw = () => {};     // what to call after a priority changes
+  let redraw = () => {};     // what to call after an action level changes
   let notebook = null;       // the loaded notebook: { fingerprint: 1..4 }
   let canSave = true;        // false if the browser blocks localStorage
 
@@ -696,10 +696,10 @@ const JazzPriority = (() => {
   }
   function save() {
     try { localStorage.setItem(storageKey(), JSON.stringify({ v: 1, p: notebook })); canSave = true; }
-    catch (e) { canSave = false; console.warn("Priorities could not be saved in this browser:", e); }
+    catch (e) { canSave = false; console.warn("Action levels could not be saved in this browser:", e); }
   }
 
-  // ---- 3) read / write one row's priority ----------------------------------
+  // ---- 3) read / write one row's action level ----------------------------------
   function getByKey(key) { return key ? load()[key] || 0 : 0; }
   function get(text) { return getByKey(keyOf(text)); }
   function setByKey(key, p) {
@@ -717,14 +717,14 @@ const JazzPriority = (() => {
   const CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>';
   const FLAG = '<svg class="jp-flag" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5 3h2v18H5zM8 4h11l-3 4 3 4H8z"/></svg>';
 
-  // Small coloured tag shown on the collapsed row. Nothing if no priority set.
+  // Small coloured tag shown on the collapsed row. Nothing if no action level set.
   function tagHTML(text) {
     const p = get(text);
     if (!p) return "";
     return `<span class="jp-tag p${p}" title="${nameOf(p)}">${FLAG}${nameOf(p)}</span>`;
   }
 
-  // The "Priority" button + animated dropdown for the expanded row.
+  // The "Action level" button + animated dropdown for the expanded row.
   function pickerHTML(text) {
     const key = keyOf(text);
     if (!key) return "";
@@ -734,9 +734,9 @@ const JazzPriority = (() => {
         <i class="jp-dot"></i><span class="jp-oname">${v ? nameOf(v) : "None"}</span><span class="jp-ck">${CHECK}</span>
       </button>`).join("");
     return `<div class="jp-pick" data-jp="${key}">
-      <span class="jp-label">Priority</span>
-      <button type="button" class="jp-btn p${p}" aria-haspopup="listbox" aria-expanded="false" title="Set the priority of this item (saved in this browser only)">
-        <i class="jp-dot"></i><span class="jp-name">${p ? nameOf(p) : "Set priority"}</span>${CHEV}
+      <span class="jp-label">Action level</span>
+      <button type="button" class="jp-btn p${p}" aria-haspopup="listbox" aria-expanded="false" title="Set the action level of this item (saved in this browser only)">
+        <i class="jp-dot"></i><span class="jp-name">${p ? nameOf(p) : "Set action level"}</span>${CHEV}
       </button>
       <div class="jp-menu" role="listbox">${opts}</div>
     </div>`;
@@ -779,13 +779,13 @@ const JazzPriority = (() => {
     closeAll(null);                                       // clicked anywhere else: close
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(null); });
-  // If another tab changes priorities, pick the change up here too.
+  // If another tab changes action levels, pick the change up here too.
   window.addEventListener("storage", (e) => {
     if (e.key === storageKey()) { notebook = null; redraw(); }
   });
 
   // ---- 6) filtering ---------------------------------------------------------
-  // `f` is the chosen filter: null (all), 1…4, or "none" (rows with no priority)
+  // `f` is the chosen filter: null (all), 1…4, or "none" (rows with no action level)
   function matches(text, f) {
     if (f == null || f === "") return true;
     const p = get(text);
@@ -804,8 +804,8 @@ const JazzPriority = (() => {
       const isActive = String(active) === String(d);
       if (!n && !isActive) return "";                      // hide empty buckets
       const cls = d === "none" ? "p0" : "p" + d;
-      return `<button type="button" class="chip jp-chip ${cls}${isActive ? " active" : ""}" data-jp-f="${d}"><i class="jp-dot"></i>${d === "none" ? "No priority" : nameOf(d)} <span class="count">${n}</span></button>`;
-    }).join("") || `<span class="jp-empty-note">Set a priority on any row (open it and use the Priority button) and it will show up here.</span>`;
+      return `<button type="button" class="chip jp-chip ${cls}${isActive ? " active" : ""}" data-jp-f="${d}"><i class="jp-dot"></i>${d === "none" ? "No action level" : nameOf(d)} <span class="count">${n}</span></button>`;
+    }).join("") || `<span class="jp-empty-note">Set an action level on any row (open it and use the Action level button) and it will show up here.</span>`;
     el.querySelectorAll("[data-jp-f]").forEach((b) => b.addEventListener("click", () => {
       const v = b.getAttribute("data-jp-f");
       onPick(String(active) === v ? null : (v === "none" ? "none" : Number(v)));
@@ -814,7 +814,7 @@ const JazzPriority = (() => {
 
   // ---- 7) Summary-page blocks ----------------------------------------------
   // list : [{ text, cat }]  — one entry per row; `cat` is the row's own status
-  //        key (e.g. "overdue") so we can split each priority by status.
+  //        key (e.g. "overdue") so we can split each action level by status.
   // opt  : { section, catDefs:[{key,label,color}], barsTitle, barsSub, noun }
   // Returns "blocks" in the format the Summary page (jd_shell.js) understands.
   function summaryBlocks(list, opt) {
@@ -825,15 +825,15 @@ const JazzPriority = (() => {
     list.forEach((r) => by[get(r.text)].push(r));
     const pct = (n) => Math.round((n / total) * 100) + "%";
     const noun = o.noun || "items";
-    const out = [{ kind: "section", title: o.section || "Priority" }];
+    const out = [{ kind: "section", title: o.section || "Action level" }];
     LEVELS.forEach((L) => out.push({ kind: "kpi", label: L.name, value: by[L.v].length, color: L.color, sub: pct(by[L.v].length) + " of " + noun, span: 3 }));
     out.push({
-      kind: "donut", title: "Priority mix", sub: "How the " + noun + " are ranked", center: noun.charAt(0).toUpperCase() + noun.slice(1), span: 4,
-      segments: LEVELS.map((L) => ({ label: L.name, value: by[L.v].length, color: L.color })).concat([{ label: "No priority", value: by[0].length, color: NONE_COLOR }]),
+      kind: "donut", title: "Action level mix", sub: "How the " + noun + " are ranked", center: noun.charAt(0).toUpperCase() + noun.slice(1), span: 4,
+      segments: LEVELS.map((L) => ({ label: L.name, value: by[L.v].length, color: L.color })).concat([{ label: "No action level", value: by[0].length, color: NONE_COLOR }]),
     });
     const defs = o.catDefs || [];
     out.push({
-      kind: "bars", title: o.barsTitle || "Priority by status", sub: o.barsSub || "Where each priority level stands (items with a priority only)", span: 8,
+      kind: "bars", title: o.barsTitle || "Action level by status", sub: o.barsSub || "Where each action level stands (items with an action level only)", span: 8,
       rows: [1, 2, 3, 4].map((v) => ({
         label: nameOf(v),
         parts: defs.map((d) => ({ label: d.label, value: by[v].filter((r) => r.cat === d.key).length, color: d.color })),
@@ -908,8 +908,8 @@ const JazzPriority = (() => {
 
       <div class="filter-label">FILTER BY STATUS / DUE</div>
       <div class="chip-row" id="dueChips"></div>
-      <!-- PRIORITY filter: chips are drawn by JazzPriority.renderFilter() -->
-      <div class="filter-label">FILTER BY PRIORITY</div>
+      <!-- ACTION LEVEL filter: chips are drawn by JazzPriority.renderFilter() -->
+      <div class="filter-label">FILTER BY ACTION LEVEL</div>
       <div class="chip-row" id="priorityChips"></div>
 
       <!-- Only meaningful (and only shown) in "All files in folder" view. -->
@@ -1508,8 +1508,8 @@ function freshFilterState() {
 let state = freshFilterState();          // "This file" view's filters
 let combinedState = freshFilterState();  // "All files" view's filters
 
-// PRIORITY: tell the shared priority module which notebook to use ("risk")
-// and what to redraw when a priority changes. The priority is remembered by
+// ACTION LEVEL: tell the shared priority module (JazzPriority) which notebook to use ("risk")
+// and what to redraw when an action level changes. The action level is remembered by
 // the issue's TITLE text, never by row number — see jd_priority.js.
 JazzPriority.init("risk", () => renderCurrentView());
 
@@ -1564,7 +1564,7 @@ function renderCurrentView() {
   const byPri = (i) => JazzPriority.matches(i.title, st.priority);
   const ownerPool = items.filter((i) => (!st.due || i.dueStatus === st.due) && byPri(i));
   const duePool = items.filter((i) => (!st.owner || i.owner.toLowerCase() === st.owner.toLowerCase()) && byPri(i));
-  // Priority chips count the issues that pass every OTHER filter.
+  // Action level chips count the issues that pass every OTHER filter.
   const priPool = items.filter((i) => matchesFilters(i, { ...st, priority: null }));
   JazzPriority.renderFilter(document.getElementById("priorityChips"), priPool.map((i) => i.title), st.priority, (v) => { st.priority = v; renderCurrentView(); });
   renderOwnerChips(ownerPool, st);
@@ -1722,7 +1722,7 @@ function renderIssueCard(item, i, ctx) {
   if (!item.targetDate && !item.isClosed) {
     badges.push(`<span class="badge status-Open">No target date · over due</span>`);
   }
-  // PRIORITY tag (1st–4th) — shows only when one has been set
+  // ACTION LEVEL tag (Action level 1–4) — shows only when one has been set
   const priTag = JazzPriority.tagHTML(item.title);
   if (priTag) badges.unshift(priTag);
   if (item.owner) {
@@ -2353,11 +2353,11 @@ JazzShell.init({
     });
     out.push({ kind: "bars", title: "How overdue are they?", sub: "Open issues past their target date", span: 6,
       rows: ageB.map(([k, v], n) => ({ label: k, parts: [{ label: k, value: v, color: n === 0 ? CLOSED : OVER }] })) });
-    // PRIORITY section: cards, mix chart and "priority by due status" bars.
+    // ACTION LEVEL section: cards, mix chart and "action level by due status" bars.
     // `scope` (a single file, or all) has already been applied to `items`.
     out.push(...JazzPriority.summaryBlocks(
       items.map((i) => ({ text: i.title, cat: i.dueStatus })),
-      { section: "Priority", noun: "issues", barsTitle: "Priority by due status", barsSub: "Are the most urgent issues the overdue ones?",
+      { section: "Action level", noun: "issues", barsTitle: "Action level by due status", barsSub: "Are the most urgent issues the overdue ones?",
         catDefs: [{ key: "overdue", label: "Over Due", color: OVER }, { key: "indue", label: "In Due", color: INDUE }, { key: "closed", label: "Closed", color: CLOSED }] }
     ));
     return out;
